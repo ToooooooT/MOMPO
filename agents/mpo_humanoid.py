@@ -198,8 +198,63 @@ class GaussianMOMPO(MOMPO):
         return loss.detach().cpu().item(), normalized_weights.detach()
 
 
-    def update_policy(self, states, target_actions, target_mean, target_std, q_value):
+    def update_policy(self, states, target_actions, target_mean, target_std, normalized_weights):
+        '''
+        Args:
+            target_actions: actions sampled from target actor network; expected shape [B, N, D]
+            target_mean: mean value of target actor network; expected shape [B, D]
+            target_std: mean value of target actor network; expected shape [B, D]
+            normalized_weights: nonparametric action distributions; expected shape [B, N, K]
+        Returns:
+            loss: policy loss
+            loss_alpha_mean: loss of fixed std distribution
+            loss_alpha_std: loss of fixed mean distribution
+        '''
         mean, std = self._actor(states)  # (batch_size, action_dim)
+        online = Normal(mean, std)
+        target_distribution = Normal(mean, std)
+        fixed_std_distribution = Normal(mean, target_std)
+        fixed_mean_distribution = Normal(target_mean, std)
+
+        loss_fixed_std = -fixed_std_distribution.log_prob(target_actions.permute(1, 0, 2)) * \
+                                normalized_weights.sum(dim=-1, keepdim=True).permute(1, 0, 2) # [N, B, D]
+        loss_fixed_std = torch.sum(loss_fixed_std)
+
+        loss_fixed_mean = -fixed_mean_distribution.log_prob(target_actions.permute(1, 0, 2)) * \
+                                normalized_weights.sum(dim=-1, keepdim=True).permute(1, 0, 2) # [N, B, D]
+        loss_fixed_mean = torch.sum(loss_fixed_mean)
+
+        loss_beta_mean = self._alpha_mean.detach() * \
+                            (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)) # [B, D]
+        loss_beta_mean = torch.sum(loss_beta_mean)
+
+        loss_beta_std = self._alpha_std.detach() * \
+                            (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)) # [B, D]
+        loss_beta_std = torch.sum(loss_beta_std)
+        
+        # policy optimization
+        loss = loss_fixed_std + loss_fixed_mean + loss_beta_mean + loss_beta_std
+        self._actor_optimizer.zero_grad()
+        loss.backward()
+        self._actor_optimizer.step()
+
+        # update alpha std
+        loss_alpha_std = self._alpha_std * \
+                            (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)).detach() # [B, D]
+        self._alpha_std_optimizer.zero_grad()
+        loss_alpha_std.backward()
+        self._alpha_std_optimizer.step()
+
+
+        # update alpha mean
+        loss_alpha_mean = self._alpha_mean * \
+                            (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)).detach() # [B, D]
+        self._alpha_mean_optimizer.zero_grad()
+        loss_alpha_mean.backward()
+        self._alpha_mean_optimizer.step()
+
+        return loss.detach().cpu().item(), loss_alpha_mean.detach().cpu().item(), loss_alpha_std.detach().cpu().item()
+
 
 
 
