@@ -4,15 +4,13 @@ import torch.nn.functional as F
 import numpy as np
 
 class Policy(nn.Module):
-    def __init__(self, input_dim, layer_size, output_dim, min_std, tanh_on_action_mean, device):
+    def __init__(self, input_dim, layer_size, output_dim, device):
         '''
         param input_dim : state dim
         param output_dim : action dim
         '''
         super().__init__()
 
-        self.min_std = min_std
-        self.tanh_on_action_mean = tanh_on_action_mean
         self.device = device
 
         self.main = nn.Sequential(
@@ -23,7 +21,18 @@ class Policy(nn.Module):
         for i in range(1, len(layer_size)):
             self.main.add_module(f'Linear {i}', nn.Linear(layer_size[i - 1], layer_size[i]))
             self.main.add_module(f'activation {i}', nn.ELU())
-        self.main.add_module(f'Output', nn.Linear(layer_size[-1], output_dim))
+
+
+    def forward(self, input):
+        raise NotImplementedError
+
+
+class GaussianPolicy(Policy):
+    def __init__(self, input_dim, layer_size, output_dim, min_std, tanh_on_action_mean, device):
+        super().__init__(input_dim, layer_size, output_dim, device)
+
+        self.tanh_on_action_mean = tanh_on_action_mean
+        self.min_std = min_std
 
         self.mean_stream = nn.Linear(layer_size[-1], output_dim)
         self.std_stream = nn.Linear(layer_size[-1], output_dim)
@@ -38,8 +47,22 @@ class Policy(nn.Module):
         return mean, std
 
 
+class CategoricalPolicy(Policy):
+    def __init__(self, input_dim, layer_size, output_dim, device):
+        super().__init__(input_dim, layer_size, output_dim, device)
+
+        self.output = nn.Sequential(
+            nn.Linear(layer_size[-1], output_dim),
+            nn.Softmax())
+
+    def forward(self, input):
+        x = self.main(input)
+        x = self.output(x)
+        return x
+
+
 class Critic(nn.Module):
-    def __init__(self, input_dim, layer_size, output_dim, tanh_on_action, k) -> None:
+    def __init__(self, input_dim, layer_size, output_dim, k) -> None:
         '''
         param input_dim : state dim + action dim
         param output_dim : output dimension of each objectives
@@ -47,7 +70,6 @@ class Critic(nn.Module):
         '''
         super().__init__()
 
-        self.tanh_on_action = tanh_on_action
         self.k = k
 
         self.shared = nn.Sequential(
@@ -64,6 +86,13 @@ class Critic(nn.Module):
                 seq.add_module(f'activation {i}', nn.ELU())
             seq.add_module(f'Output', nn.Linear(layer_size[-1], output_dim))
             self.main.append(seq)
+    
+
+class GaussianCritic(Critic):
+    def __init__(self, input_dim, layer_size, output_dim, tanh_on_action, k) -> None:
+        super().__init__(input_dim, layer_size, output_dim, k)
+
+        self.tanh_on_action = tanh_on_action
 
     def forward(self, state, action):
         if self.tanh_on_action:
@@ -71,6 +100,18 @@ class Critic(nn.Module):
         else:
             x = torch.cat([state, action], dim=-1)
         x = self.shared(x)
+        y = []
+        for i in range(self.k):
+            y.append(self.main[i](x))
+        return torch.cat(y, dim=-1)
+
+
+class CategoricalCritic(Critic):
+    def __init__(self, input_dim, layer_size, output_dim, k) -> None:
+        super().__init__(input_dim, layer_size, output_dim, k)
+
+    def forward(self, state):
+        x = self.shared(state)
         y = []
         for i in range(self.k):
             y.append(self.main[i](x))
