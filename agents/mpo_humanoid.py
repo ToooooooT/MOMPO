@@ -9,6 +9,7 @@ from torch.distributions import kl_divergence
 
 from models.humanoid import GaussianPolicy, GaussianCritic
 from utils.replay_buffer import replay_buffer
+from utils.retrace import GaussianRetrace, CategoricalRetrace
 import numpy as np
 
 # def kl_divergence(mean1, std1, mean2, std2):
@@ -52,12 +53,8 @@ class MOMPO():
 
         # k objectives
         self._k = k
-
-        # copy target netwrok
-        self.hard_update(self._target_actor, self._actor)
-        self.hard_update(self._target_critic, self._critic)
-
     
+
     def hard_update(self, target, source):
         for target_param, param in zip(target.parameters(), source.parameters()):
             target_param.data.copy_(param.data)
@@ -143,8 +140,8 @@ class GaussianMOMPO(MOMPO):
         self._critic_optimizer = optim.Adam(self._critic.parameters(), lr=lr, eps=adam_eps)
 
         # trainable values
-        self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True)
-        self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True)
+        self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True).to(device)
+        self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True).to(device)
 
         self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=lr, eps=adam_eps)
         self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=lr, eps=adam_eps)
@@ -153,12 +150,17 @@ class GaussianMOMPO(MOMPO):
         self._beta_mean = beta_mean
         self._beta_std = beta_std
 
+        # copy target netwrok
+        self.hard_update(self._target_actor, self._actor)
+        self.hard_update(self._target_critic, self._critic)
+
     def select_action(self):
         pass
 
 
     def update(self):
         states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
+        states = states.to(self._device)
         target_actions = []
         q_value = []
         with torch.no_grad():
@@ -174,9 +176,21 @@ class GaussianMOMPO(MOMPO):
         loss_temperature, normalized_weights = self.update_temperature(q_value)
 
         # update policy
+        loss_policy, loss_alpha_mean, loss_alpha_std = self.update_policy(states, target_actions, target_mean, target_std, normalized_weights)
+
+        # update critic
+        loss_critic = self.update_critic()
+
+        loss = {'loss_temperature': loss_temperature,
+                'loss_policy': loss_policy,
+                'loss_alpha_mean': loss_alpha_mean,
+                'loss_alpha_std': loss_alpha_std,
+                'loss_critic': loss_critic}
+
+        return loss
 
 
-    def update_temperature(self, q_value):
+    def update_temperature(self, q_value: torch.Tensor):
         '''
         Args:
             q_value: Q-values associated with the actions sampled from the target policy; 
@@ -198,7 +212,12 @@ class GaussianMOMPO(MOMPO):
         return loss.detach().cpu().item(), normalized_weights.detach()
 
 
-    def update_policy(self, states, target_actions, target_mean, target_std, normalized_weights):
+    def update_policy(self, 
+                      states: torch.Tensor, 
+                      target_actions: torch.Tensor, 
+                      target_mean: torch.Tensor, 
+                      target_std: torch.Tensor, 
+                      normalized_weights: torch.Tensor):
         '''
         Args:
             target_actions: actions sampled from target actor network; expected shape [B, N, D]
@@ -211,7 +230,6 @@ class GaussianMOMPO(MOMPO):
             loss_alpha_std: loss of fixed mean distribution
         '''
         mean, std = self._actor(states)  # (batch_size, action_dim)
-        online = Normal(mean, std)
         target_distribution = Normal(mean, std)
         fixed_std_distribution = Normal(mean, target_std)
         fixed_mean_distribution = Normal(target_mean, std)
@@ -255,6 +273,22 @@ class GaussianMOMPO(MOMPO):
 
         return loss.detach().cpu().item(), loss_alpha_mean.detach().cpu().item(), loss_alpha_std.detach().cpu().item()
 
+    def update_critic(self):
+        states, actions, rewards, log_probs, dones \
+            = self._replay_buffer.sample_trajectories(self._batch_size) 
+        states = states.to(self._device) # (T, S)
+        actions = actions.to(self._device) # (T, D)
+        rewards = rewards.to(self._device) # (T, 1)
+        log_probs = log_probs.to(self._device) # (T, D)
+        dones = dones.to(self._device) # (T, 1)
 
+        retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma)
+        retrace_target = retrace.objective(states, actions, rewards, log_probs, dones) # (T, K)
 
-
+        q_values = self._critic(states, actions) # (T, K)
+        criterion = F.mse_loss
+        loss = criterion(q_values, retrace_target).sum(dim=-1)
+        self._critic_optimizer.zero_grad()
+        loss.backward()
+        self._critic_optimizer.step()
+        return loss.detach().cpu().item()
