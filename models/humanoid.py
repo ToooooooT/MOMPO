@@ -5,10 +5,6 @@ import numpy as np
 
 class Policy(nn.Module):
     def __init__(self, input_dim, layer_size, output_dim, device):
-        '''
-        param input_dim : state dim
-        param output_dim : action dim
-        '''
         super().__init__()
 
         self.device = device
@@ -29,6 +25,10 @@ class Policy(nn.Module):
 
 class GaussianPolicy(Policy):
     def __init__(self, input_dim, layer_size, output_dim, min_std, tanh_on_action_mean, device):
+        '''
+        Args:
+            output_dim : dimensionality of action space
+        '''
         super().__init__(input_dim, layer_size, output_dim, device)
 
         self.tanh_on_action_mean = tanh_on_action_mean
@@ -38,6 +38,11 @@ class GaussianPolicy(Policy):
         self.std_stream = nn.Linear(layer_size[-1], output_dim)
 
     def forward(self, input):
+        '''
+        Returns:
+            mean : expected shape (B, D)
+            std : expected shape (B, D)
+        '''
         x = self.main(input)
         mean = self.mean_stream(x)
         std = self.std_stream(x)
@@ -49,6 +54,10 @@ class GaussianPolicy(Policy):
 
 class CategoricalPolicy(Policy):
     def __init__(self, input_dim, layer_size, output_dim, device):
+        '''
+        Args:
+            output_dim: number of actions to choose
+        '''
         super().__init__(input_dim, layer_size, output_dim, device)
 
         self.output = nn.Sequential(
@@ -56,6 +65,10 @@ class CategoricalPolicy(Policy):
             nn.Softmax())
 
     def forward(self, input):
+        '''
+        Returns:
+            x : expected shape (B, D)
+        '''
         x = self.main(input)
         x = self.output(x)
         return x
@@ -64,9 +77,8 @@ class CategoricalPolicy(Policy):
 class Critic(nn.Module):
     def __init__(self, input_dim, layer_size, output_dim, k) -> None:
         '''
-        param input_dim : state dim + action dim
-        param output_dim : output dimension of each objectives
-        param k : k objectives
+        Args:
+            k : k objectives
         '''
         super().__init__()
 
@@ -90,11 +102,19 @@ class Critic(nn.Module):
 
 class GaussianCritic(Critic):
     def __init__(self, input_dim, layer_size, output_dim, tanh_on_action, k) -> None:
+        '''
+        Args:
+            output_dim: 1; one state-action value for one objective
+        '''
         super().__init__(input_dim, layer_size, output_dim, k)
 
         self.tanh_on_action = tanh_on_action
 
     def forward(self, state, action):
+        '''
+        Returns:
+            y : expected shape (B, K)
+        '''
         if self.tanh_on_action:
             x = torch.cat([state, F.tanh(action)], dim=-1)
         else:
@@ -108,11 +128,19 @@ class GaussianCritic(Critic):
 
 class CategoricalCritic(Critic):
     def __init__(self, input_dim, layer_size, output_dim, k) -> None:
+        '''
+        Args:
+            output_dim: number of actions to choose
+        '''
         super().__init__(input_dim, layer_size, output_dim, k)
 
     def forward(self, state):
+        '''
+        Returns:
+            y : expected shape (B, K, D)
+        '''
         x = self.shared(state)
         y = []
         for i in range(self.k):
             y.append(self.main[i](x))
-        return torch.cat(y, dim=-1)
+        return torch.stack(y, dim=1)
