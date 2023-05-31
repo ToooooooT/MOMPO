@@ -1,12 +1,18 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-from models.humanoid import Policy, Critic
+
+from torch.distributions.normal import Normal
+from torch.distributions.categorical import Categorical
+from torch.distributions import kl_divergence
+
+from models.humanoid import GaussianPolicy, GaussianCritic
 from utils.replay_buffer import replay_buffer
 import numpy as np
 
-def kl_divergence(mean1, std1, mean2, std2):
-    pass
+# def kl_divergence(mean1, std1, mean2, std2):
+#     pass
 
 
 class MOMPO():
@@ -97,29 +103,36 @@ class GaussianMOMPO(MOMPO):
                         target_update_freq,
                         device,
                         k)
+        '''
+        B: batch_size correspond to L in paper
+        N: number of sampled actions, correspond to M in paper
+        D: dimensionality of action space
+        S: dimesionality of state space
+        K: number of objectives
+        '''
 
         # TODO : get env action soace and state space
-        self._actor = Policy(input_dim=env.state_dim, 
+        self._actor = GaussianPolicy(input_dim=env.state_dim, 
                             layer_size=policy_layer_size, 
                             output_dim=env.action_dim,
                             min_std=min_std, 
                             tanh_on_action_mean=tanh_on_action_mean, 
                             device=device).to(device)
 
-        self._target_actor = Policy(input_dim=env.state_dim, 
+        self._target_actor = GaussianPolicy(input_dim=env.state_dim, 
                                     layer_size=policy_layer_size, 
                                     output_dim=env.action_dim,
                                     min_std=min_std, 
                                     tanh_on_action_mean=tanh_on_action_mean, 
                                     device=device).to(device)
 
-        self._critic = Critic(input_dim=env.state_dim + env.action_dim,
+        self._critic = GaussianCritic(input_dim=env.state_dim + env.action_dim,
                              layer_size=critic_layer_size, 
                              output_dim=1,
                              tanh_on_action=tanh_on_action, 
                              k=k).to(device)
 
-        self._target_critic = Critic(input_dim=env.state_dim + env.action_dim,
+        self._target_critic = GaussianCritic(input_dim=env.state_dim + env.action_dim,
                                     layer_size=critic_layer_size, 
                                     output_dim=1,
                                     tanh_on_action=tanh_on_action, 
@@ -145,31 +158,44 @@ class GaussianMOMPO(MOMPO):
 
 
     def update(self):
-        states = self._replay_buffer.sample_states(self._batch_size) # (batch_size, state_dim)
+        states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
         target_actions = []
         q_value = []
         with torch.no_grad():
-            target_mean, target_std = self._target_actor(states) # (batch_size, action_dim)
+            target_mean, target_std = self._target_actor(states) # (B, D)
+            target_normal_distribution = Normal(target_mean, target_std)
             for i in range(self._actions_sample_per_state):
-                target_actions.append(target_mean + torch.randn_like(target_mean) * target_std) # (batch_size, action_dim)
-                q_value.append(self._target_critic(states, target_actions[i])) # (batch_size, k)
-        target_actions = torch.stack(target_actions, dim=1) # (batch_size, number of actions, action_dim)
-        q_value = torch.stack(q_value, dim=1) # (batch_size, number of actions, k)
+                target_actions.append(target_normal_distribution.sample()) # (B, D)
+                q_value.append(self._target_critic(states, target_actions[i])) # (B, K)
+        target_actions = torch.stack(target_actions, dim=1) # (B, N, D)
+        q_value = torch.stack(q_value, dim=1) # (B, N, K)
 
         # update temperature
-        self.update_temperature(q_value)
+        loss_temperature, normalized_weights = self.update_temperature(q_value)
 
         # update policy
 
 
     def update_temperature(self, q_value):
-        loss = self._temperatures * self._epsilons \
-                + self._temperatures * torch.log(torch.exp(q_value / self._temperatures.reshape(1, 1, self._k)).mean(dim=1)).mean(dim=0)
+        '''
+        Args:
+            q_value: Q-values associated with the actions sampled from the target policy; 
+                expected shape [B, N, K]
+        Returns:
+            loss: scalar value loss
+            normalized_weights: used for policy optimization; expected shape [B, N, K]
+        '''
+        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
+
+        # compute normlized importance weights
+        normalized_weights = F.softmax(tempered_q_values, dim=1)
+
+        loss = self._temperatures * (self._epsilons + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
         self._temperatures_optimizer.step()
-        return loss.detach().cpu().item()
+        return loss.detach().cpu().item(), normalized_weights.detach()
 
 
     def update_policy(self, states, target_actions, target_mean, target_std, q_value):
