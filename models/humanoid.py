@@ -1,14 +1,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 class Policy(nn.Module):
-    def __init__(self, input_dim, layer_size, output_dim, device):
-        super().__init__()
+    def __init__(self, input_dim, layer_size, output_dim, min_std, tanh_on_action_mean, device):
         '''
         param input_dim : state dim
         param output_dim : action dim
         '''
+        super().__init__()
+
+        self.min_std = min_std
+        self.tanh_on_action_mean = tanh_on_action_mean
         self.device = device
 
         self.main = nn.Sequential(
@@ -28,18 +32,24 @@ class Policy(nn.Module):
         x = self.main(input)
         mean = self.mean_stream(x)
         std = self.std_stream(x)
-        std = F.softplus(std) + 1e-4 # add 1e-4 to be the minimum standard (minimum variance : 1e-8)
-        epsilon = torch.randn_like(std).to(self.device)
-        return mean + epsilon * std
+        std = F.softplus(std) + torch.tensor(np.array(self.min_std), device=self.device) 
+        if self.tanh_on_action_mean:
+            return F.tanh(mean), std
+        return mean, std
 
 
 class Critic(nn.Module):
-    def __init__(self, input_dim, layer_size, output_dim, k) -> None:
+    def __init__(self, input_dim, layer_size, output_dim, tanh_on_action, k) -> None:
         '''
         param input_dim : state dim + action dim
-        param output_dim : k
+        param output_dim : output dimension of each objectives
+        param k : k objectives
         '''
         super().__init__()
+
+        self.tanh_on_action = tanh_on_action
+        self.k = k
+
         self.shared = nn.Sequential(
             nn.Linear(input_dim, layer_size[0]),
             nn.LayerNorm(layer_size[0]),
@@ -48,11 +58,20 @@ class Critic(nn.Module):
 
         self.main = nn.ModuleList([])
         for i in range(k):
-            self.main.append(nn.Sequential(
-
-            ))
+            seq = nn.Sequential()
+            for j in range(1, len(layer_size)):
+                seq.add_module(f'Linear {j}', nn.Linear(layer_size[i - 1], layer_size[i]))
+                seq.add_module(f'activation {i}', nn.ELU())
+            seq.add_module(f'Output', nn.Linear(layer_size[-1], output_dim))
+            self.main.append(seq)
 
     def forward(self, state, action):
-        x = torch.cat([state, action], dim=-1)
-        x = self.main(x)
-        return x
+        if self.tanh_on_action:
+            x = torch.cat([state, F.tanh(action)], dim=-1)
+        else:
+            x = torch.cat([state, action], dim=-1)
+        x = self.shared(x)
+        y = []
+        for i in range(self.k):
+            y.append(self.main[i](x))
+        return torch.cat(y, dim=-1)
