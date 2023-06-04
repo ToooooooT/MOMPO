@@ -86,9 +86,18 @@ class BehaviorGaussianMOMPO(MOMPO):
 
 
     def select_action(self, state):
+        '''
+        Args:
+            state: expect shape (B, S)
+        Returns:
+            action: expected shape (B, D)
+            log_prob: expected shape (B, D)
+        '''
         with torch.no_grad():
             mean, std = self._actor(state)
-        return (mean + torch.randn_like(std)).detach().cpu().numpy()
+        m = Normal(mean, std)
+        action = m.sample()
+        return action, m.log_prob(action)
 
 
 class GaussianMOMPO(BehaviorGaussianMOMPO):
