@@ -33,7 +33,7 @@ class replay_buffer():
         Returns:
             states : expected shape (T, S)
             actions : expected shape (T, D)
-            rewards : expected shape (T, 1)
+            rewards : expected shape (T, K)
             log_probs : expected shape (T, 1)
             dones : expected shape (T, 1)
         '''
