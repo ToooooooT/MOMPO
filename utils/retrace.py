@@ -3,11 +3,12 @@ from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 
 class Retrace():
-    def __init__(self, retrace_seq_size, target_critic, target_actor, gamma) -> None:
+    def __init__(self, retrace_seq_size, target_critic, target_actor, gamma, k) -> None:
         self._retrace_seq_size = retrace_seq_size
         self._critic = target_critic
         self._actor = target_actor
         self._gamma = gamma
+        self._k = k
 
     def objective(self, 
                   states: torch.Tensor, 
