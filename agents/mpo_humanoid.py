@@ -23,7 +23,6 @@ class MOMPO():
                  actions_sample_per_state = 20,
                  epsilon = 0.1,
                  batch_size = 512,
-                 replay_buffer_size = 1e6,
                  target_update_freq = 200,
                  device='cpu',
                  k = 1) -> None:
@@ -35,12 +34,9 @@ class MOMPO():
 
         self._epsilons = epsilon
 
-
         self._batch_size = batch_size
         self._target_update_freq = target_update_freq
         self._device = device
-
-        self._replay_buffer = replay_buffer(replay_buffer_size)
 
         # k objectives
         self._k = k
@@ -59,8 +55,9 @@ class MOMPO():
 
 class BehaviorGaussianMOMPO(MOMPO):
     def __init__(self, 
-                 env, 
-                 policy_layer_size, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
                  tanh_on_action_mean=True, 
                  min_std=0.000001, 
                  retrace_seq_size=8, 
@@ -68,7 +65,6 @@ class BehaviorGaussianMOMPO(MOMPO):
                  actions_sample_per_state=20, 
                  epsilon=0.1, 
                  batch_size=512, 
-                 replay_buffer_size=1000000, 
                  target_update_freq=200, 
                  device='cpu', 
                  k=1) -> None:
@@ -77,14 +73,13 @@ class BehaviorGaussianMOMPO(MOMPO):
                          actions_sample_per_state, 
                          epsilon, 
                          batch_size, 
-                         replay_buffer_size, 
                          target_update_freq, 
                          device, 
                          k)
 
-        self._actor = GaussianPolicy(input_dim=env.state_dim, 
+        self._actor = GaussianPolicy(input_dim=state_dim, 
                     layer_size=policy_layer_size, 
-                    output_dim=env.action_dim,
+                    output_dim=action_dim,
                     min_std=min_std, 
                     tanh_on_action_mean=tanh_on_action_mean, 
                     device=device).to(device)
@@ -98,7 +93,8 @@ class BehaviorGaussianMOMPO(MOMPO):
 
 class GaussianMOMPO(BehaviorGaussianMOMPO):
     def __init__(self, 
-                 env, 
+                 state_dim,
+                 action_dim,
                  policy_layer_size=(300, 200), 
                  tanh_on_action_mean=True, 
                  min_std=0.000001, 
@@ -121,7 +117,8 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
                  alpha_mean=0.001, 
                  alpha_std=0.001) -> None:
         super().__init__(self, 
-                        env, 
+                        state_dim,
+                        action_dim, 
                         policy_layer_size, 
                         tanh_on_action_mean, 
                         min_std, 
@@ -130,7 +127,6 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
                         actions_sample_per_state,
                         epsilon,
                         batch_size,
-                        replay_buffer_size,
                         target_update_freq,
                         device,
                         k)
@@ -143,20 +139,20 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         '''
 
         # TODO : get env action soace and state space
-        self._target_actor = GaussianPolicy(input_dim=env.state_dim, 
+        self._target_actor = GaussianPolicy(input_dim=state_dim, 
                                     layer_size=policy_layer_size, 
-                                    output_dim=env.action_dim,
+                                    output_dim=action_dim,
                                     min_std=min_std, 
                                     tanh_on_action_mean=tanh_on_action_mean, 
                                     device=device).to(device)
 
-        self._critic = Critic(input_dim=env.state_dim + env.action_dim,
+        self._critic = Critic(input_dim=state_dim + action_dim,
                              layer_size=critic_layer_size, 
                              output_dim=1,
                              tanh_on_action=tanh_on_action, 
                              k=k).to(device)
 
-        self._target_critic = Critic(input_dim=env.state_dim + env.action_dim,
+        self._target_critic = Critic(input_dim=state_dim + action_dim,
                                     layer_size=critic_layer_size, 
                                     output_dim=1,
                                     tanh_on_action=tanh_on_action, 
@@ -178,6 +174,8 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         # constraint on KL divergence
         self._beta_mean = beta_mean
         self._beta_std = beta_std
+
+        self._replay_buffer = replay_buffer(replay_buffer_size)
 
         # copy target netwrok
         self.hard_update(self._target_actor, self._actor)
