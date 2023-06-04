@@ -84,7 +84,6 @@ class CategoricalRetrace(Retrace):
         Returns:
             target_q_value: expected shape (T, K)
         '''
-        # TODO: target_values
         with torch.no_grad():
             action_probs = self._actor(states) # (T, D)
             m = Categorical(action_probs)
@@ -93,8 +92,10 @@ class CategoricalRetrace(Retrace):
             importance_weights = torch.stack([importance_weights, torch.ones_like(importance_weights)], 
                                                     dim=-1).min(dim=-1) # (T, 1)
 
-            target_q_values = self._critic(states).gather(2, actions.reshape(actions.shape[0], self._k, 1)) # (T, K)
-            target_values: torch.Tensor = None # (T, K)
+            target_q_values = self._critic(states) # (T, K, D)
+            T, K, D = target_q_values.size()
+            target_values: torch.Tensor = (target_q_values * action_probs.view(T,1,D)).sum(dim=2) # (T, K)
+            target_q_values = target_q_values.gather(2, actions.view(-1, 1, 1).expand(-1, 4, 1)) # (T, K)
             delta = rewards + self._gamma * target_values * (1 - dones) - target_q_values # (T, K)
 
             ret_q_values = []
