@@ -36,6 +36,9 @@ class DeepSeaTreasure(object):
         self.current_state = np.array([0, 0])
         self.terminal = False
 
+        self.timestep = 0
+        self.end_timestep = 200
+
     def get_map_value(self, pos):
         return self.sea_map[pos[0]][pos[1]]
 
@@ -45,11 +48,13 @@ class DeepSeaTreasure(object):
         '''
         self.current_state = np.array([0, 0])
         self.terminal = False
+        self.timestep = 0
 
     def step(self, action):
         '''
             step one move and feed back reward
         '''
+        self.timestep += 1
         dir = {
             0: np.array([-1, 0]),  # up
             1: np.array([1, 0]),  # down
@@ -72,5 +77,8 @@ class DeepSeaTreasure(object):
             self.terminal = True
         time_penalty = -1.0 / self.max_reward
         reward = np.array([treasure_value, time_penalty])
+
+        if self.timestep >= self.end_timestep:
+            self.terminal = True
 
         return self.current_state, reward, self.terminal
