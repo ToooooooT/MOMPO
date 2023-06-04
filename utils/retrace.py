@@ -86,7 +86,6 @@ class CategoricalRetrace(Retrace):
             states: expected shape (T, S)
             actions: expected shape (T, 1)
             rewards: expected shape (T, 1)
-            next_states: expected shape (T, S)
             behavior_log_probs: expected shape (T, 1)
             dones: expected shape (T, 1)
         Returns:
