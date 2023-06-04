@@ -47,6 +47,14 @@ class GaussianRetrace(Retrace):
             importance_weights = torch.stack([importance_weights, torch.ones_like(importance_weights)], 
                                                     dim=-1).min(dim=-1) # (T, 1)
 
+            # Monte-Carlo method to estimate the continuous expectation
+            target_values = torch.zeros(len(states), self._k)
+            actions_mc = target_distribution.sample(sample_shape=(1000,))
+            for actions_est in actions_mc:
+                pi = target_distribution.log_prob(actions_est).sum(dim=-1) # (T,)
+                Q_est = self._critic(states, actions_est) # (T, K)
+                target_values += pi.view(-1, 1) * Q_est
+
             target_q_values = self._critic(states, actions) # (T, K)
             target_values: torch.Tensor = None # (T, K)
             delta = rewards + self._gamma * target_values * (1 - dones) - target_q_values # (T, K)
@@ -96,7 +104,7 @@ class CategoricalRetrace(Retrace):
             target_q_values = self._critic(states) # (T, K, D)
             T, K, D = target_q_values.size()
             target_values: torch.Tensor = (target_q_values * action_probs.view(T,1,D)).sum(dim=2) # (T, K)
-            target_q_values = target_q_values.gather(2, actions.view(-1, 1, 1).expand(-1, 4, 1)) # (T, K)
+            target_q_values = target_q_values.gather(2, actions.view(-1, 1, 1).expand(-1, self._k, 1)) # (T, K)
             delta = rewards + self._gamma * target_values * (1 - dones) - target_q_values # (T, K)
 
             ret_q_values = []
