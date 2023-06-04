@@ -302,7 +302,7 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         log_probs = log_probs.to(self._device) # (T, D)
         dones = dones.to(self._device) # (T, 1)
 
-        retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma)
+        retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma, self._k)
         retrace_target = retrace.objective(states, actions, rewards, log_probs, dones) # (T, K)
 
         q_values = self._critic(states, actions) # (T, K)
