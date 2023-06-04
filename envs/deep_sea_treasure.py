@@ -61,11 +61,11 @@ class DeepSeaTreasure(object):
         valid = lambda x, ind: (x[ind] >= self.state_spec[ind][2][0]) and (x[ind] <= self.state_spec[ind][2][1])
 
         if valid(next_state, 0) and valid(next_state, 1):
-            if self.get_map_value(next_state) != -1:
+            if self.get_map_value(next_state) != -10:
                 self.current_state = next_state
 
         treasure_value = self.get_map_value(self.current_state)
-        if treasure_value == 0 or treasure_value == -1:
+        if treasure_value == 0 or treasure_value == -10:
             treasure_value = 0.0
         else:
             treasure_value /= self.max_reward
