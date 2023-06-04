@@ -7,7 +7,7 @@ from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 from torch.distributions import kl_divergence
 
-from models.humanoid import GaussianPolicy, GaussianCritic
+from models.humanoid import GaussianPolicy, Critic
 from utils.replay_buffer import replay_buffer
 from utils.retrace import GaussianRetrace, CategoricalRetrace
 import numpy as np
@@ -18,18 +18,12 @@ import numpy as np
 
 class MOMPO():
     def __init__(self, 
-                 env, 
-                 policy_layer_size, 
-                 critic_layer_size, 
                  retrace_seq_size = 8,
                  gamma=0.99,
                  actions_sample_per_state = 20,
                  epsilon = 0.1,
-                 temperature = 1,
                  batch_size = 512,
                  replay_buffer_size = 1e6,
-                 lr=3e-4, 
-                 adam_eps=1e-3,
                  target_update_freq = 200,
                  device='cpu',
                  k = 1) -> None:
@@ -41,9 +35,6 @@ class MOMPO():
 
         self._epsilons = epsilon
 
-        # trainable values
-        self._temperatures = torch.tensor(np.array([temperature] * k), requires_grad=True)
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
 
         self._batch_size = batch_size
         self._target_update_freq = target_update_freq
@@ -60,7 +51,46 @@ class MOMPO():
             target_param.data.copy_(param.data)
 
 
-class GaussianMOMPO(MOMPO):
+class BehaviorGaussianMOMPO(MOMPO):
+    def __init__(self, 
+                 env, 
+                 policy_layer_size, 
+                 tanh_on_action_mean=True, 
+                 min_std=0.000001, 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 batch_size=512, 
+                 replay_buffer_size=1000000, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1) -> None:
+        super().__init__(retrace_seq_size, 
+                         gamma, 
+                         actions_sample_per_state, 
+                         epsilon, 
+                         batch_size, 
+                         replay_buffer_size, 
+                         target_update_freq, 
+                         device, 
+                         k)
+
+        self._actor = GaussianPolicy(input_dim=env.state_dim, 
+                    layer_size=policy_layer_size, 
+                    output_dim=env.action_dim,
+                    min_std=min_std, 
+                    tanh_on_action_mean=tanh_on_action_mean, 
+                    device=device).to(device)
+
+
+    def select_action(self, state):
+        with torch.no_grad():
+            mean, std = self._actor(state)
+        return (mean + torch.randn_like(std)).detach().cpu().numpy()
+
+
+class GaussianMOMPO(BehaviorGaussianMOMPO):
     def __init__(self, 
                  env, 
                  policy_layer_size=(300, 200), 
@@ -87,16 +117,14 @@ class GaussianMOMPO(MOMPO):
         super().__init__(self, 
                         env, 
                         policy_layer_size, 
-                        critic_layer_size, 
+                        tanh_on_action_mean, 
+                        min_std, 
                         retrace_seq_size,
                         gamma,
                         actions_sample_per_state,
                         epsilon,
-                        temperature,
                         batch_size,
                         replay_buffer_size,
-                        lr, 
-                        adam_eps,
                         target_update_freq,
                         device,
                         k)
@@ -109,13 +137,6 @@ class GaussianMOMPO(MOMPO):
         '''
 
         # TODO : get env action soace and state space
-        self._actor = GaussianPolicy(input_dim=env.state_dim, 
-                            layer_size=policy_layer_size, 
-                            output_dim=env.action_dim,
-                            min_std=min_std, 
-                            tanh_on_action_mean=tanh_on_action_mean, 
-                            device=device).to(device)
-
         self._target_actor = GaussianPolicy(input_dim=env.state_dim, 
                                     layer_size=policy_layer_size, 
                                     output_dim=env.action_dim,
@@ -123,13 +144,13 @@ class GaussianMOMPO(MOMPO):
                                     tanh_on_action_mean=tanh_on_action_mean, 
                                     device=device).to(device)
 
-        self._critic = GaussianCritic(input_dim=env.state_dim + env.action_dim,
+        self._critic = Critic(input_dim=env.state_dim + env.action_dim,
                              layer_size=critic_layer_size, 
                              output_dim=1,
                              tanh_on_action=tanh_on_action, 
                              k=k).to(device)
 
-        self._target_critic = GaussianCritic(input_dim=env.state_dim + env.action_dim,
+        self._target_critic = Critic(input_dim=env.state_dim + env.action_dim,
                                     layer_size=critic_layer_size, 
                                     output_dim=1,
                                     tanh_on_action=tanh_on_action, 
@@ -140,9 +161,11 @@ class GaussianMOMPO(MOMPO):
         self._critic_optimizer = optim.Adam(self._critic.parameters(), lr=lr, eps=adam_eps)
 
         # trainable values
+        self._temperatures = torch.tensor(np.array([temperature] * k), requires_grad=True)
         self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True).to(device)
         self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True).to(device)
 
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
         self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=lr, eps=adam_eps)
         self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=lr, eps=adam_eps)
 
@@ -153,9 +176,6 @@ class GaussianMOMPO(MOMPO):
         # copy target netwrok
         self.hard_update(self._target_actor, self._actor)
         self.hard_update(self._target_critic, self._critic)
-
-    def select_action(self):
-        pass
 
 
     def update(self):
