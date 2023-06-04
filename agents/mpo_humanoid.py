@@ -233,6 +233,10 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         # update critic
         loss_critic = self.update_critic()
 
+        if t % self._target_update_freq == 0:
+            self.hard_update(self._target_actor, self._actor)
+            self.hard_update(self._target_critic, self._critic)
+
         loss = {'loss_temperature': loss_temperature,
                 'loss_policy': loss_policy,
                 'loss_alpha_mean': loss_alpha_mean,
