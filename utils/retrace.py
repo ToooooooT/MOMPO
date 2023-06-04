@@ -56,7 +56,6 @@ class GaussianRetrace(Retrace):
                 target_values += pi.view(-1, 1) * Q_est
 
             target_q_values = self._critic(states, actions) # (T, K)
-            target_values: torch.Tensor = None # (T, K)
             delta = rewards + self._gamma * target_values * (1 - dones) - target_q_values # (T, K)
 
             ret_q_values = []
