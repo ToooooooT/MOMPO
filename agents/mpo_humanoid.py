@@ -50,6 +50,12 @@ class MOMPO():
         for target_param, param in zip(target.parameters(), source.parameters()):
             target_param.data.copy_(param.data)
 
+    def save(self, logdir):
+        raise NotImplementedError
+
+    def load(self, model_path):
+        raise NotImplementedError
+
 
 class BehaviorGaussianMOMPO(MOMPO):
     def __init__(self, 
@@ -177,8 +183,27 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         self.hard_update(self._target_actor, self._actor)
         self.hard_update(self._target_critic, self._critic)
 
+    
+    def save(self, logdir):
+        print(f'Saving models to {logdir}')
+        torch.save({
+            'actor': self._actor.state_dict(),
+            'critic': self._critic.state_dict(),
+            'target_actor': self._target_actor.state_dict(),
+            'target_critic': self._target_critic.state_dict(),
+            },
+            f'{logdir}/mompo.pth'
+        )
 
-    def update(self):
+
+    def load(self, model_path):
+        print(f'Loading model from {model_path}')
+        model = torch.load(model_path)
+        self._actor.load_state_dict(model['actor'])
+        self._critic.load_state_dict(model['critic'])
+
+
+    def update(self, t):
         states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
         states = states.to(self._device)
         target_actions = []
