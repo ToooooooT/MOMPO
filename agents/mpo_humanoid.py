@@ -12,10 +12,6 @@ from utils.replay_buffer import replay_buffer
 from utils.retrace import GaussianRetrace, CategoricalRetrace
 import numpy as np
 
-# def kl_divergence(mean1, std1, mean2, std2):
-#     pass
-
-
 class MOMPO():
     def __init__(self, 
                  retrace_seq_size = 8,
@@ -147,7 +143,6 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         K: number of objectives
         '''
 
-        # TODO : get env action soace and state space
         self._target_actor = GaussianPolicy(input_dim=state_dim, 
                                     layer_size=policy_layer_size, 
                                     output_dim=action_dim,
