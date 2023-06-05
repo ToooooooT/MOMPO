@@ -60,6 +60,7 @@ class CategoricalPolicy(Policy):
         '''
         super().__init__(input_dim, layer_size, output_dim, device)
 
+        # output normalized probabilities of each categories of actions, different from the papaer
         self.output = nn.Sequential(
             nn.Linear(layer_size[-1], output_dim),
             nn.Softmax())
