@@ -24,7 +24,7 @@ class DeepSeaTreasure(object):
         self.max_reward = 1.0
 
         # state space specification: 2-dimensional discrete box
-        self.state_spec = [['discrete', 1, [0, 10]], ['discrete', 1, [0, 10]]]
+        self.state_spec = [['discrete', 1, [0, 10]], ['discrete', 1, [0, 9]]]
 
         # action space specification: 1 dimension, 0 up, 1 down, 2 left, 3 right
         self.action_spec = ['discrete', 1, [0, 4]]

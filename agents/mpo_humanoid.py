@@ -12,12 +12,12 @@ from utils.replay_buffer import replay_buffer
 from utils.retrace import GaussianRetrace, CategoricalRetrace
 import numpy as np
 
-class MOMPO():
+class MPO():
     def __init__(self, 
                  retrace_seq_size = 8,
                  gamma=0.99,
                  actions_sample_per_state = 20,
-                 epsilon = 0.1,
+                 epsilon: np.array = np.array(0.1),
                  batch_size = 512,
                  target_update_freq = 200,
                  device='cpu',
@@ -49,7 +49,7 @@ class MOMPO():
         raise NotImplementedError
 
 
-class BehaviorGaussianMOMPO(MOMPO):
+class BehaviorGaussianMPO(MPO):
     def __init__(self, 
                  state_dim,
                  action_dim,
@@ -96,7 +96,7 @@ class BehaviorGaussianMOMPO(MOMPO):
         return action, m.log_prob(action)
 
 
-class GaussianMOMPO(BehaviorGaussianMOMPO):
+class GaussianMPO(BehaviorGaussianMPO):
     def __init__(self, 
                  state_dim,
                  action_dim,
@@ -111,7 +111,6 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
                  epsilon=0.1, 
                  beta_mean=0.001, 
                  beta_std=0.00001, 
-                 temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
                  lr=0.0003, 
@@ -121,20 +120,19 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
                  k=1, 
                  alpha_mean=0.001, 
                  alpha_std=0.001) -> None:
-        super().__init__(self, 
-                        state_dim,
-                        action_dim, 
-                        policy_layer_size, 
-                        tanh_on_action_mean, 
-                        min_std, 
-                        retrace_seq_size,
-                        gamma,
-                        actions_sample_per_state,
-                        epsilon,
-                        batch_size,
-                        target_update_freq,
-                        device,
-                        k)
+        super().__init__(state_dim,
+                         action_dim, 
+                         policy_layer_size, 
+                         tanh_on_action_mean, 
+                         min_std, 
+                         retrace_seq_size,
+                         gamma,
+                         actions_sample_per_state,
+                         epsilon,
+                         batch_size,
+                         target_update_freq,
+                         device,
+                         k)
         '''
         B: batch_size correspond to L in paper
         N: number of sampled actions, correspond to M in paper
@@ -167,11 +165,9 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         self._critic_optimizer = optim.Adam(self._critic.parameters(), lr=lr, eps=adam_eps)
 
         # trainable values
-        self._temperatures = torch.tensor(np.array([temperature] * k), requires_grad=True)
         self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True).to(device)
         self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True).to(device)
 
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
         self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=lr, eps=adam_eps)
         self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=lr, eps=adam_eps)
 
@@ -185,7 +181,7 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         self.hard_update(self._target_actor, self._actor)
         self.hard_update(self._target_critic, self._critic)
 
-    
+
     def save(self, logdir):
         print(f'Saving models to {logdir}')
         torch.save({
@@ -240,27 +236,8 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
 
         return loss
 
-
     def update_temperature(self, q_value: torch.Tensor):
-        '''
-        Args:
-            q_value: Q-values associated with the actions sampled from the target policy; 
-                expected shape [B, N, K]
-        Returns:
-            loss: scalar value loss
-            normalized_weights: used for policy optimization; expected shape [B, N, K]
-        '''
-        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
-
-        # compute normlized importance weights
-        normalized_weights = F.softmax(tempered_q_values, dim=1)
-
-        loss = self._temperatures * (self._epsilons + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
-        loss = torch.sum(loss)
-        self._temperatures_optimizer.zero_grad()
-        loss.backward()
-        self._temperatures_optimizer.step()
-        return loss.detach().cpu().item(), normalized_weights.detach()
+        raise NotImplementedError
 
 
     def update_policy(self, 
@@ -274,7 +251,7 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
             target_actions: actions sampled from target actor network; expected shape [B, N, D]
             target_mean: mean value of target actor network; expected shape [B, D]
             target_std: mean value of target actor network; expected shape [B, D]
-            normalized_weights: nonparametric action distributions; expected shape [B, N, K]
+            normalized_weights: nonparametric action distributions; expected shape [B, N, K] | [B, N, 1]
         Returns:
             loss: policy loss
             loss_alpha_mean: loss of fixed std distribution
@@ -322,7 +299,8 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         loss_alpha_mean.backward()
         self._alpha_mean_optimizer.step()
 
-        return loss.detach().cpu().item(), loss_alpha_mean.detach().cpu().item(), loss_alpha_std.detach().cpu().item()
+        return loss.detach().cpu().item(), loss_alpha_mean.detach().cpu().item(), loss_alpha_std.detach().cpu().item()   
+
 
     def update_critic(self):
         states, actions, rewards, log_probs, dones \
@@ -343,3 +321,157 @@ class GaussianMOMPO(BehaviorGaussianMOMPO):
         loss.backward()
         self._critic_optimizer.step()
         return loss.detach().cpu().item()
+
+
+class GaussianMOMPO(GaussianMPO):
+    def __init__(self, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
+                 tanh_on_action_mean=True, 
+                 min_std=0.000001, 
+                 critic_layer_size=(400, 400, 300), 
+                 tanh_on_action=True, 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 beta_mean=0.001, 
+                 beta_std=0.00001, 
+                 temperature=1, 
+                 batch_size=512, 
+                 replay_buffer_size=1000000, 
+                 lr=0.0003, 
+                 adam_eps=0.001, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1, 
+                 alpha_mean=0.001, 
+                 alpha_std=0.001) -> None:
+        super().__init__(state_dim,
+                         action_dim,
+                         policy_layer_size, 
+                         tanh_on_action_mean, 
+                         min_std, 
+                         critic_layer_size, 
+                         tanh_on_action, 
+                         retrace_seq_size, 
+                         gamma, 
+                         actions_sample_per_state, 
+                         epsilon, 
+                         beta_mean, 
+                         beta_std, 
+                         batch_size, 
+                         replay_buffer_size, 
+                         lr, 
+                         adam_eps, 
+                         target_update_freq, 
+                         device, 
+                         k, 
+                         alpha_mean, 
+                         alpha_std)
+
+        # trainable values
+        self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+
+
+    def update_temperature(self, q_value: torch.Tensor):
+        '''
+        Args:
+            q_value: Q-values associated with the actions sampled from the target policy; 
+                expected shape [B, N, K]
+        Returns:
+            loss: scalar value loss
+            normalized_weights: used for policy optimization; expected shape [B, N, K]
+        '''
+        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
+
+        # compute normlized importance weights
+        normalized_weights = F.softmax(tempered_q_values, dim=1)
+
+        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = torch.sum(loss)
+        self._temperatures_optimizer.zero_grad()
+        loss.backward()
+        self._temperatures_optimizer.step()
+        return loss.detach().cpu().item(), normalized_weights.detach()
+
+
+class GaussianScalarizedMPO(GaussianMPO):
+    def __init__(self, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
+                 tanh_on_action_mean=True, 
+                 min_std=0.000001, 
+                 critic_layer_size=(400, 400, 300), 
+                 tanh_on_action=True, 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 weight: np.array =np.array([1]),
+                 beta_mean=0.001, 
+                 beta_std=0.00001, 
+                 temperature=1, 
+                 batch_size=512, 
+                 replay_buffer_size=1000000, 
+                 lr=0.0003, 
+                 adam_eps=0.001, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1, 
+                 alpha_mean=0.001, 
+                 alpha_std=0.001) -> None:
+        super().__init__(state_dim,
+                         action_dim,
+                         policy_layer_size, 
+                         tanh_on_action_mean, 
+                         min_std, 
+                         critic_layer_size, 
+                         tanh_on_action, 
+                         retrace_seq_size, 
+                         gamma, 
+                         actions_sample_per_state, 
+                         epsilon, 
+                         beta_mean, 
+                         beta_std, 
+                         batch_size, 
+                         replay_buffer_size, 
+                         lr, 
+                         adam_eps, 
+                         target_update_freq, 
+                         device, 
+                         k, 
+                         alpha_mean, 
+                         alpha_std)
+
+        # trainable values
+        self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+
+        self._weight = torch.tensor(weight).to(device)
+
+
+    def update_temperature(self, q_value: torch.Tensor):
+        '''
+        Args:
+            q_value: Q-values associated with the actions sampled from the target policy; 
+                expected shape [B, N, K]
+        Returns:
+            loss: scalar value loss
+            normalized_weights: used for policy optimization; expected shape [B, N, 1]
+        '''
+        tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
+                            / self._temperatures.reshape(1, 1, 1) # (B, N, 1)
+
+        # compute normlized importance weights
+        normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
+
+        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = torch.sum(loss)
+        self._temperatures_optimizer.zero_grad()
+        loss.backward()
+        self._temperatures_optimizer.step()
+        return loss.detach().cpu().item(), normalized_weights.detach()
