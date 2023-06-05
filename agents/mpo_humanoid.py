@@ -306,7 +306,7 @@ class GaussianMPO(BehaviorGaussianMPO):
 
     def update_critic(self):
         states, actions, rewards, log_probs, dones \
-            = self._replay_buffer.sample_trajectories(self._batch_size) 
+            = self._replay_buffer.sample_trajectories() 
         states = states.to(self._device) # (T, S)
         actions = actions.to(self._device) # (T, D)
         rewards = rewards.to(self._device) # (T, 1)
@@ -682,7 +682,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
         loss_policy = -online_distribution.log_prob(target_actions.squeeze().transpose(1, 0)) * \
                                         normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
-        loss_policy = torch.sum(loss)
+        loss_policy = torch.sum(loss_policy)
 
         loss_beta = self._alpha.detach() * \
                         (self._beta - kl_divergence(target_distribution, online_distribution)) # (B,)
@@ -707,21 +707,21 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
     def update_critic(self):
         states, actions, rewards, log_probs, dones \
-            = self._replay_buffer.sample_trajectories(self._batch_size) 
-        states = states.to(self._device) # (T, S)
-        actions = actions.to(self._device) # (T, 1)
-        rewards = rewards.to(self._device) # (T, 1)
+            = self._replay_buffer.sample_trajectories() 
+        states = states.to(self._device).to(torch.float) # (T, S)
+        actions = actions.to(self._device).to(torch.float) # (T, 1)
+        rewards = rewards.to(self._device).to(torch.float) # (T, 1)
         log_probs = log_probs.to(self._device) # (T, 1)
-        dones = dones.to(self._device) # (T, 1)
+        dones = dones.to(self._device).to(torch.float) # (T, 1)
 
-        states = torch.concatenate([states, torch.zeros_like(states[0])], dim=0) # append a terminal state
+        states = torch.concatenate([states, torch.zeros((1, self._state_dim))], dim=0) # append a terminal state
         with torch.no_grad():
             actions_ = torch.zeros((actions.shape[0], self._action_dim)).to(self._device) # (B, D); input for critic
             for i in range(1, actions.shape[0]):
-                actions_[i - 1, actions[i].item()] = 1
+                actions_[i - 1, int(actions[i].item())] = 1
             target_q_values = rewards + self._gamma * self._critic(states[1:], actions_) * (1 - dones)
 
-        q_values = self._critic(states, actions) # (T, K)
+        q_values = self._critic(states[:-1], actions) # (T, K)
         criterion = F.mse_loss
         loss = criterion(q_values, target_q_values).sum(dim=-1)
         self._critic_optimizer.zero_grad()
