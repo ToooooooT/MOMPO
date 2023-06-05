@@ -7,7 +7,7 @@ from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 from torch.distributions import kl_divergence
 
-from models.humanoid import GaussianPolicy, Critic
+from models.humanoid import GaussianPolicy, CategoricalPolicy, Critic
 from utils.replay_buffer import replay_buffer
 from utils.retrace import GaussianRetrace, CategoricalRetrace
 import numpy as np
@@ -17,7 +17,7 @@ class MPO():
                  retrace_seq_size = 8,
                  gamma=0.99,
                  actions_sample_per_state = 20,
-                 epsilon: np.array = np.array(0.1),
+                 epsilon=[0.1],
                  batch_size = 512,
                  target_update_freq = 200,
                  device='cpu',
@@ -28,7 +28,7 @@ class MPO():
         self._gamma = gamma
         self._actions_sample_per_state = actions_sample_per_state
 
-        self._epsilons = epsilon
+        self._epsilons = np.array(epsilon)
 
         self._batch_size = batch_size
         self._target_update_freq = target_update_freq
@@ -84,16 +84,16 @@ class BehaviorGaussianMPO(MPO):
     def select_action(self, state):
         '''
         Args:
-            state: expect shape (B, S)
+            state: expect shape (1, S)
         Returns:
-            action: expected shape (B, D)
-            log_prob: expected shape (B, D)
+            action: expected shape (1, D)
+            log_prob: expected shape (1, D)
         '''
         with torch.no_grad():
             mean, std = self._actor(state)
         m = Normal(mean, std)
         action = m.sample()
-        return action, m.log_prob(action)
+        return action.detach().cpu().numpy(), m.log_prob(action).detach().cpu().numpy()
 
 
 class GaussianMPO(BehaviorGaussianMPO):
@@ -286,7 +286,8 @@ class GaussianMPO(BehaviorGaussianMPO):
 
         # update alpha std
         loss_alpha_std = self._alpha_std * \
-                            (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)).detach() # [B, D]
+                        (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)).detach() # [B, D]
+        loss_alpha_std = torch.sum(loss_alpha_std)
         self._alpha_std_optimizer.zero_grad()
         loss_alpha_std.backward()
         self._alpha_std_optimizer.step()
@@ -294,7 +295,8 @@ class GaussianMPO(BehaviorGaussianMPO):
 
         # update alpha mean
         loss_alpha_mean = self._alpha_mean * \
-                            (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)).detach() # [B, D]
+                        (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)).detach() # [B, D]
+        loss_alpha_mean = torch.sum(loss_alpha_mean)
         self._alpha_mean_optimizer.zero_grad()
         loss_alpha_mean.backward()
         self._alpha_mean_optimizer.step()
@@ -446,6 +448,396 @@ class GaussianScalarizedMPO(GaussianMPO):
                          k, 
                          alpha_mean, 
                          alpha_std)
+
+        # trainable values
+        self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+
+        self._weight = torch.tensor(weight).to(device)
+
+
+    def update_temperature(self, q_value: torch.Tensor):
+        '''
+        Args:
+            q_value: Q-values associated with the actions sampled from the target policy; 
+                expected shape [B, N, K]
+        Returns:
+            loss: scalar value loss
+            normalized_weights: used for policy optimization; expected shape [B, N, 1]
+        '''
+        tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
+                            / self._temperatures.reshape(1, 1, 1) # (B, N, 1)
+
+        # compute normlized importance weights
+        normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
+
+        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = torch.sum(loss)
+        self._temperatures_optimizer.zero_grad()
+        loss.backward()
+        self._temperatures_optimizer.step()
+        return loss.detach().cpu().item(), normalized_weights.detach()
+
+
+class BehaviorCategoricalMPO(MPO):
+    def __init__(self, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 batch_size=512, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1) -> None:
+        super().__init__(retrace_seq_size, 
+                         gamma, 
+                         actions_sample_per_state, 
+                         epsilon, 
+                         batch_size, 
+                         target_update_freq, 
+                         device, 
+                         k)
+
+        self._state_dim = state_dim
+        self._action_dim = action_dim
+
+        self._actor = CategoricalPolicy(input_dim=state_dim, 
+                                        layer_size=policy_layer_size, 
+                                        output_dim=action_dim,
+                                        device=device).to(device)
+
+
+    def select_action(self, state):
+        '''
+        Args:
+            state: expect shape (1, S)
+        Returns:
+            action: expected shape (1, 1)
+            log_prob: expected shape (1, 1)
+        '''
+        with torch.no_grad():
+            action_prob = self._actor(state)
+        m = Categorical(action_prob)
+        action = m.sample()
+        return action.unsqueeze(0).detach().cpu().numpy(), m.log_prob(action).unsqueeze(0).detach().cpu().numpy()
+
+
+class CategoricalMPO(BehaviorCategoricalMPO):
+    def __init__(self, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
+                 critic_layer_size=(400, 400, 300), 
+                 tanh_on_action=True, 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 beta=0.001, 
+                 batch_size=512, 
+                 replay_buffer_size=1000000, 
+                 lr=0.0003, 
+                 adam_eps=0.001, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1, 
+                 alpha=0.001) -> None:
+        super().__init__(state_dim,
+                         action_dim, 
+                         policy_layer_size, 
+                         retrace_seq_size,
+                         gamma,
+                         actions_sample_per_state,
+                         epsilon,
+                         batch_size,
+                         target_update_freq,
+                         device,
+                         k)
+        '''
+        B: batch_size correspond to L in paper
+        N: number of sampled actions, correspond to M in paper
+        D: number of categories of action
+        S: dimesionality of state space
+        K: number of objectives
+        '''
+
+        self._target_actor = CategoricalPolicy(input_dim=state_dim, 
+                                    layer_size=policy_layer_size, 
+                                    output_dim=action_dim,
+                                    device=device).to(device)
+
+        self._critic = Critic(input_dim=state_dim + action_dim,
+                             layer_size=critic_layer_size, 
+                             output_dim=1,
+                             tanh_on_action=tanh_on_action, 
+                             k=k).to(device)
+
+        self._target_critic = Critic(input_dim=state_dim + action_dim,
+                                    layer_size=critic_layer_size, 
+                                    output_dim=1,
+                                    tanh_on_action=tanh_on_action, 
+                                    k=k).to(device)
+
+
+        self._actor_optimizer = optim.Adam(self._actor.parameters(), lr=lr, eps=adam_eps)
+        self._critic_optimizer = optim.Adam(self._critic.parameters(), lr=lr, eps=adam_eps)
+
+        # trainable values
+        self._alpha = torch.tensor(np.array([alpha]), requires_grad=True).to(device)
+
+        self._alpha_optimizer = optim.Adam([self._alpha], lr=lr, eps=adam_eps)
+
+        # constraint on KL divergence
+        self._beta = beta
+
+        self._replay_buffer = replay_buffer(replay_buffer_size)
+
+        # copy target netwrok
+        self.hard_update(self._target_actor, self._actor)
+        self.hard_update(self._target_critic, self._critic)
+
+
+    def save(self, logdir):
+        print(f'Saving models to {logdir}')
+        torch.save({
+            'actor': self._actor.state_dict(),
+            'critic': self._critic.state_dict(),
+            'target_actor': self._target_actor.state_dict(),
+            'target_critic': self._target_critic.state_dict(),
+            },
+            f'{logdir}/mompo.pth'
+        )
+
+
+    def load(self, model_path):
+        print(f'Loading model from {model_path}')
+        model = torch.load(model_path)
+        self._actor.load_state_dict(model['actor'])
+        self._critic.load_state_dict(model['critic'])
+
+
+    def update(self, t):
+        states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
+        states = states.to(self._device)
+        target_actions = []
+        q_value = []
+        with torch.no_grad():
+            target_action_probs = self._target_actor(states) # (B, D)
+            target_distribution = Categorical(target_action_probs)
+            for i in range(self._actions_sample_per_state):
+                target_action = target_distribution.sample().view(-1, 1)  # (B, 1)
+                target_actions.append(target_action)
+                action = torch.zeros_like((target_action_probs)).to(self._device) # (B, D), for critic input
+                for i in range(target_action.shape[0]):
+                    action[i][target_action[i].item()] = 1
+                q_value.append(self._target_critic(states, action)) # (B, K)
+
+        target_actions = torch.stack(target_actions, dim=1) # (B, N, 1)
+        q_value = torch.stack(q_value, dim=1) # (B, N, K)
+
+        # update temperature
+        loss_temperature, normalized_weights = self.update_temperature(q_value)
+
+        # update policy
+        loss_policy, loss_alpha = self.update_policy(states, target_actions, target_action_probs, normalized_weights)
+
+        # update critic
+        loss_critic = self.update_critic()
+
+        if t % self._target_update_freq == 0:
+            self.hard_update(self._target_actor, self._actor)
+            self.hard_update(self._target_critic, self._critic)
+
+        loss = {'loss_temperature': loss_temperature,
+                'loss_policy': loss_policy,
+                'loss_alpha': loss_alpha,
+                'loss_critic': loss_critic}
+
+        return loss
+
+    def update_temperature(self, q_value: torch.Tensor):
+        raise NotImplementedError
+
+
+    def update_policy(self, 
+                      states: torch.Tensor, 
+                      target_actions: torch.Tensor, 
+                      target_action_probs: torch.Tensor, 
+                      normalized_weights: torch.Tensor):
+        '''
+        Args:
+            target_actions: actions sampled from target actor network; expected shape [B, N, 1]
+            target_action_probs: actions probability from target actor network [B, D]
+            normalized_weights: nonparametric action distributions; expected shape [B, N, K] | [B, N, 1]
+        Returns:
+            loss: policy loss
+            loss_alpha: loss of distribution
+        '''
+        action_probs = self._actor(states)  # (B, D)
+        online_distribution = Categorical(action_probs)
+        target_distribution = Categorical(target_action_probs)
+
+        loss_policy = -online_distribution.log_prob(target_actions.squeeze().transpose(1, 0)) * \
+                                        normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
+        loss_policy = torch.sum(loss)
+
+        loss_beta = self._alpha.detach() * \
+                        (self._beta - kl_divergence(target_distribution, online_distribution)) # (B,)
+        loss_beta = torch.sum(loss_beta)
+
+        # policy optimization
+        loss = loss_policy + loss_beta
+        self._actor_optimizer.zero_grad()
+        loss.backward()
+        self._actor_optimizer.step()
+
+        # update alpha
+        loss_alpha = self._alpha * \
+                        (self._beta - kl_divergence(target_distribution, online_distribution).detach()) # (B,)
+        loss_alpha = torch.sum(loss_alpha)
+        self._alpha_optimizer.zero_grad()
+        loss_alpha.backward()
+        self._alpha_optimizer.step()
+
+        return loss.detach().cpu().item(), loss_alpha.detach().cpu().item()
+
+
+    def update_critic(self):
+        states, actions, rewards, log_probs, dones \
+            = self._replay_buffer.sample_trajectories(self._batch_size) 
+        states = states.to(self._device) # (T, S)
+        actions = actions.to(self._device) # (T, 1)
+        rewards = rewards.to(self._device) # (T, 1)
+        log_probs = log_probs.to(self._device) # (T, 1)
+        dones = dones.to(self._device) # (T, 1)
+
+        states = torch.concatenate([states, torch.zeros_like(states[0])], dim=0) # append a terminal state
+        with torch.no_grad():
+            actions_ = torch.zeros((actions.shape[0], self._action_dim)).to(self._device) # (B, D); input for critic
+            for i in range(1, actions.shape[0]):
+                actions_[i - 1, actions[i].item()] = 1
+            target_q_values = rewards + self._gamma * self._critic(states[1:], actions_) * (1 - dones)
+
+        q_values = self._critic(states, actions) # (T, K)
+        criterion = F.mse_loss
+        loss = criterion(q_values, target_q_values).sum(dim=-1)
+        self._critic_optimizer.zero_grad()
+        loss.backward()
+        self._critic_optimizer.step()
+        return loss.detach().cpu().item()
+
+
+class CategoricalMOMPO(CategoricalMPO):
+    def __init__(self, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
+                 critic_layer_size=(400, 400, 300), 
+                 tanh_on_action=True, 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 beta=0.001,
+                 temperature=1, 
+                 batch_size=512, 
+                 replay_buffer_size=1000000, 
+                 lr=0.0003, 
+                 adam_eps=0.001, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1, 
+                 alpha=0.001) -> None:
+        super().__init__(state_dim,
+                         action_dim,
+                         policy_layer_size, 
+                         critic_layer_size, 
+                         tanh_on_action, 
+                         retrace_seq_size, 
+                         gamma, 
+                         actions_sample_per_state, 
+                         epsilon, 
+                         beta,
+                         batch_size, 
+                         replay_buffer_size, 
+                         lr, 
+                         adam_eps, 
+                         target_update_freq, 
+                         device, 
+                         k, 
+                         alpha)
+
+        # trainable values
+        self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+
+
+    def update_temperature(self, q_value: torch.Tensor):
+        '''
+        Args:
+            q_value: Q-values associated with the actions sampled from the target policy; 
+                expected shape [B, N, K]
+        Returns:
+            loss: scalar value loss
+            normalized_weights: used for policy optimization; expected shape [B, N, K]
+        '''
+        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
+
+        # compute normlized importance weights
+        normalized_weights = F.softmax(tempered_q_values, dim=1)
+
+        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = torch.sum(loss)
+        self._temperatures_optimizer.zero_grad()
+        loss.backward()
+        self._temperatures_optimizer.step()
+        return loss.detach().cpu().item(), normalized_weights.detach()
+
+
+
+class CategoricalScalarizedMPO(CategoricalMPO):
+    def __init__(self, 
+                 state_dim,
+                 action_dim,
+                 policy_layer_size=(300, 200), 
+                 critic_layer_size=(400, 400, 300), 
+                 tanh_on_action=True, 
+                 retrace_seq_size=8, 
+                 gamma=0.99, 
+                 actions_sample_per_state=20, 
+                 epsilon=0.1, 
+                 weight: np.array =np.array([1]),
+                 beta=0.001, 
+                 temperature=1, 
+                 batch_size=512, 
+                 replay_buffer_size=1000000, 
+                 lr=0.0003, 
+                 adam_eps=0.001, 
+                 target_update_freq=200, 
+                 device='cpu', 
+                 k=1, 
+                 alpha=0.001) -> None:
+        super().__init__(state_dim,
+                         action_dim,
+                         policy_layer_size, 
+                         critic_layer_size, 
+                         tanh_on_action, 
+                         retrace_seq_size, 
+                         gamma, 
+                         actions_sample_per_state, 
+                         epsilon, 
+                         beta, 
+                         batch_size, 
+                         replay_buffer_size, 
+                         lr, 
+                         adam_eps, 
+                         target_update_freq, 
+                         device, 
+                         k, 
+                         alpha)
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
