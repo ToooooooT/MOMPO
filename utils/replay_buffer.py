@@ -4,7 +4,7 @@ import torch
 
 class replay_buffer():
     def __init__(self, replay_buffer_size) -> None:
-        self._size = replay_buffer_size // 200 # assmue length average is 200
+        self._size = replay_buffer_size
         self._trajectory_buffer = [None] * replay_buffer_size
         self._idx = 0
         self._isfull = False
@@ -23,7 +23,7 @@ class replay_buffer():
             states : expected shape (B, S)
         '''
         if self._isfull:
-            traj_idx = [random.randint(0, self._size) for i in range(batch_size)]
+            traj_idx = [random.randint(0, self._size - 1) for i in range(batch_size)]
         else:
             traj_idx = [random.randint(0, self._idx - 1) for i in range(batch_size)]
         states = []
