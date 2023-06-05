@@ -11,6 +11,7 @@ from models.humanoid import GaussianPolicy, CategoricalPolicy, Critic
 from utils.replay_buffer import replay_buffer
 from utils.retrace import GaussianRetrace, CategoricalRetrace
 import numpy as np
+import random
 
 class MPO():
     def __init__(self, 
@@ -510,18 +511,22 @@ class BehaviorCategoricalMPO(MPO):
                                         device=device).to(device)
 
 
-    def select_action(self, state):
+    def select_action(self, state, epsilon):
         '''
         Args:
             state: expect shape (1, S)
+            epsilon: use for random policy
         Returns:
-            action: expected shape (1, 1)
-            log_prob: expected shape (1, 1)
+            action: expected shape (1,)
+            log_prob: expected shape (1,)
         '''
         with torch.no_grad():
             action_prob = self._actor(state)
         m = Categorical(action_prob)
-        action = m.sample()
+        if random.random() < epsilon:
+            action = torch.tensor(random.randint(0, self._action_dim - 1))
+        else:
+            action = m.sample()
         return action.unsqueeze(0).detach().cpu().numpy(), m.log_prob(action).unsqueeze(0).detach().cpu().numpy()
 
 
