@@ -721,12 +721,12 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
         states = torch.concatenate([states, torch.zeros((1, self._state_dim))], dim=0) # append a terminal state
         with torch.no_grad():
-            actions_ = torch.zeros((actions.shape[0], self._action_dim)).to(self._device) # (B, D); input for critic
-            for i in range(1, actions.shape[0]):
-                actions_[i - 1, int(actions[i].item())] = 1
-            target_q_values = rewards + self._gamma * self._critic(states[1:], actions_) * (1 - dones)
+            actions_ = torch.zeros((actions.shape[0] + 1, self._action_dim)).to(self._device) # (B + 1, D); input for critic
+            for i in range(actions.shape[0]):
+                actions_[i, int(actions[i].item())] = 1
+            target_q_values = rewards + self._gamma * self._critic(states[1:], actions_[1:]) * (1 - dones)
 
-        q_values = self._critic(states[:-1], actions) # (T, K)
+        q_values = self._critic(states[:-1], actions_[:-1]) # (T, K)
         criterion = F.mse_loss
         loss = criterion(q_values, target_q_values).sum(dim=-1)
         self._critic_optimizer.zero_grad()
