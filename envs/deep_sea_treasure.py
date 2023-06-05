@@ -49,6 +49,7 @@ class DeepSeaTreasure(object):
         self.current_state = np.array([0, 0])
         self.terminal = False
         self.timestep = 0
+        return self.current_state
 
     def step(self, action):
         '''
