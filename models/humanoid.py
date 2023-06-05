@@ -48,7 +48,7 @@ class GaussianPolicy(Policy):
         std = self.std_stream(x)
         std = F.softplus(std) + torch.tensor(np.array(self.min_std), device=self.device) 
         if self.tanh_on_action_mean:
-            return F.tanh(mean), std
+            return torch.tanh(mean), std
         return mean, std
 
 
@@ -111,7 +111,7 @@ class Critic(nn.Module):
             y : expected shape (B, K)
         '''
         if self.tanh_on_action:
-            x = torch.cat([state, F.tanh(action)], dim=-1)
+            x = torch.cat([state, torch.tanh(action)], dim=-1)
         else:
             x = torch.cat([state, action], dim=-1)
         x = self.shared(x)
