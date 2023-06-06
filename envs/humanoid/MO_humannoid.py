@@ -10,11 +10,11 @@ class MOHumanoid_run():
     def reset(self):
         '''
         Returns:
-            state: np.array; expected shape (1, 67)
+            state: np.array; expected shape (67,)
         '''
         type, reward, discount, state = self._env.reset()
         state = [x.reshape(1, -1) for x in state.values()]
-        state = np.concatenate(state, axis=-1)
+        state = np.concatenate(state, axis=-1).reshape(-1)
         return state
 
     def step(self, action):
@@ -22,12 +22,12 @@ class MOHumanoid_run():
         Args:
             action: expected shape (21,)
         Returns:
-            state: np.array; expected shape (1, 67)
+            state: np.array; expected shape (67,)
             reward: np.array; expected shape (1,)
             done: if reward == 1, then done
         '''
         type, reward, discount, state = self._env.step(action)
         state = [x.reshape(1, -1) for x in state.values()]
-        state = np.concatenate(state, axis=-1)
+        state = np.concatenate(state, axis=-1).reshape(-1)
         return state, np.array([reward if reward is not None else 0]), reward is None or reward == 1
 
