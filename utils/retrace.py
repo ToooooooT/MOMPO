@@ -20,8 +20,8 @@ class Retrace():
         raise NotImplementedError
 
 class GaussianRetrace(Retrace):
-    def __init__(self, retrace_seq_size, target_critic, target_actor, gamma) -> None:
-        super().__init__(retrace_seq_size, target_critic, target_actor, gamma)
+    def __init__(self, retrace_seq_size, target_critic, target_actor, gamma, k) -> None:
+        super().__init__(retrace_seq_size, target_critic, target_actor, gamma, k)
 
     def objective(self, 
                   states: torch.Tensor, 
