@@ -55,14 +55,15 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
         i += 1
         state = env.reset()
         t = 0
-        episode_reward = np.zeros((k,))
+        episode_reward = np.zeros((2,))
         trajectory = []
         while True:
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action[0])
+            energy_penalty = np.array([-np.linalg.norm(action)])
             trajectory.append((state, action, reward, log_prob, [int(done)]))
             state = next_state
-            episode_reward += reward
+            episode_reward += np.concatenate([reward, energy_penalty])
             t += 1
             args.eps -= (1 - args.eps_min) / args.eps_decay
             args.eps = max(args.eps, args.eps_min)
@@ -71,13 +72,15 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
 
         agent._replay_buffer.push(trajectory)
     
-        agent.update(i)
+        loss = agent.update(i)
 
         # print result
         print(f"Episode: {i}, length: {t} ", end='')
         for j in range(episode_reward.shape[0]):
-            print(f'reward{j}: {episode_reward[j]} ', end='')
+            print(f'reward{j}: {episode_reward[j]:.5f} ', end='')
         print()
+        print(f'[Epsiode: {i}, loss_temperature: {loss["loss_temperature"]:.5f}, loss_policy: {loss["loss_policy"]:.5f}]')
+        print(f'loss_alpha_mean: {loss["loss_alpha_mean"]:.5f}, loss_alpha_std: {loss["loss_alpha_std"]:.5f}, loss_critic: {loss["loss_critic"]:.5f}]')
 
         # log result in tensorboard
         for j in range(episode_reward.shape[0]):
