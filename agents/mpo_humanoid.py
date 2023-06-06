@@ -9,7 +9,7 @@ from torch.distributions import kl_divergence
 
 from models.humanoid import GaussianPolicy, CategoricalPolicy, Critic
 from utils.replay_buffer import replay_buffer
-from utils.retrace import GaussianRetrace, CategoricalRetrace
+from utils.retrace import GaussianRetrace
 import numpy as np
 import random
 
@@ -85,10 +85,10 @@ class BehaviorGaussianMPO(MPO):
     def select_action(self, state):
         '''
         Args:
-            state: expect shape (1, S)
+            state: expect shape (S,)
         Returns:
-            action: expected shape (1, D)
-            log_prob: expected shape (1, D)
+            action: expected shape (D,)
+            log_prob: expected shape (D,)
         '''
         with torch.no_grad():
             mean, std = self._actor(state)
@@ -693,7 +693,7 @@ class BehaviorCategoricalMPO(MPO):
     def select_action(self, state, epsilon):
         '''
         Args:
-            state: expect shape (1, S)
+            state: expect shape (S,)
             epsilon: use for random policy
         Returns:
             action: expected shape (1,)
