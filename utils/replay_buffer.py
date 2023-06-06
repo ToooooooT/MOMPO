@@ -47,4 +47,4 @@ class replay_buffer():
             idx = random.randint(0, self._size - 1)
         else:
             idx = random.randint(0, self._idx - 1)
-        return (torch.tensor(np.array(x)) for x in zip(*self._trajectory_buffer[idx]))
+        return (torch.tensor(np.array(x), dtype=torch.float) for x in zip(*self._trajectory_buffer[idx]))
