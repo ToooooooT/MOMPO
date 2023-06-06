@@ -33,8 +33,7 @@ class GaussianRetrace(Retrace):
         Args:
             states: expected shape (T, S)
             actions: expected shape (T, D)
-            rewards: expected shape (T, 1)
-            next_states: expected shape (T, S)
+            rewards: expected shape (T, K)
             behavior_log_probs: expected shape (T, D)
             dones: expected shape (T, 1)
         Returns:
@@ -44,16 +43,16 @@ class GaussianRetrace(Retrace):
             mean, std = self._actor(states) # (T, D)
             target_distribution = Normal(mean, std)
             importance_weights = torch.exp(torch.sum(target_distribution.log_prob(actions) - behavior_log_probs, dim=-1, keepdim=True))
-            importance_weights = torch.stack([importance_weights, torch.ones_like(importance_weights)], 
-                                                    dim=-1).min(dim=-1) # (T, 1)
+            importance_weights = torch.stack([importance_weights, torch.ones_like(importance_weights).to(torch.float)], dim=-1).min(dim=-1)[0] # (T, 1)
 
             # Monte-Carlo method to estimate the continuous expectation
             target_values = torch.zeros(len(states), self._k)
-            actions_mc = target_distribution.sample(sample_shape=(1000,))
+            sample_num = 1000
+            actions_mc = target_distribution.sample(sample_shape=(sample_num,))
             for actions_est in actions_mc:
-                pi = target_distribution.log_prob(actions_est).sum(dim=-1) # (T,)
                 Q_est = self._critic(states, actions_est) # (T, K)
-                target_values += pi.view(-1, 1) * Q_est
+                target_values += Q_est
+            target_values /= sample_num
 
             target_q_values = self._critic(states, actions) # (T, K)
             delta = rewards + self._gamma * target_values * (1 - dones) - target_q_values # (T, K)
@@ -62,9 +61,10 @@ class GaussianRetrace(Retrace):
             for i in range(states.shape[0]):
                 ret_q_value = target_q_values[i]
                 c = 1
-                for j in range(self._retrace_seq_size):
-                    c *= importance_weights[i + j]
-                    ret_q_value += ((self._gamma ** j) * c * delta[i + j])
+                for j in range(i, min(states.shape[0], i + self._retrace_seq_size)):
+                    if j != i:
+                        c *= importance_weights[j]
+                    ret_q_value += ((self._gamma ** (j - i)) * c * delta[j])
                 ret_q_values.append(ret_q_value)
             ret_q_values = torch.stack(ret_q_values, dim=0) # (T, K)
 
