@@ -48,7 +48,7 @@ class GaussianPolicy(Policy):
         std = self.std_stream(x)
         std = F.softplus(std) + torch.tensor(np.array(self.min_std), device=self.device) 
         if self.tanh_on_action_mean:
-            return F.tanh(mean), std
+            return torch.tanh(mean), std
         return mean, std
 
 
@@ -60,9 +60,10 @@ class CategoricalPolicy(Policy):
         '''
         super().__init__(input_dim, layer_size, output_dim, device)
 
+        # output normalized probabilities of each categories of actions, different from the papaer
         self.output = nn.Sequential(
             nn.Linear(layer_size[-1], output_dim),
-            nn.Softmax())
+            nn.Softmax(dim=-1))
 
     def forward(self, input):
         '''
@@ -96,8 +97,8 @@ class Critic(nn.Module):
         for i in range(k):
             seq = nn.Sequential()
             for j in range(1, len(layer_size)):
-                seq.add_module(f'Linear {j}', nn.Linear(layer_size[i - 1], layer_size[i]))
-                seq.add_module(f'activation {i}', nn.ELU())
+                seq.add_module(f'Linear {j}', nn.Linear(layer_size[j - 1], layer_size[j]))
+                seq.add_module(f'activation {j}', nn.ELU())
             seq.add_module(f'Output', nn.Linear(layer_size[-1], output_dim))
             self.main.append(seq)
 
@@ -110,7 +111,7 @@ class Critic(nn.Module):
             y : expected shape (B, K)
         '''
         if self.tanh_on_action:
-            x = torch.cat([state, F.tanh(action)], dim=-1)
+            x = torch.cat([state, torch.tanh(action)], dim=-1)
         else:
             x = torch.cat([state, action], dim=-1)
         x = self.shared(x)

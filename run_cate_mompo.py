@@ -1,4 +1,4 @@
-from agents.mpo_humanoid import GaussianMOMPO, BehaviorGaussianMPO
+from agents.mpo_humanoid import CategoricalMOMPO, BehaviorCategoricalMPO
 from envs.deep_sea_treasure import DeepSeaTreasure
 
 import argparse
@@ -6,10 +6,12 @@ import os
 from collections import namedtuple
 import numpy as np
 import time
+import random
 
 import torch
 import torch.nn as nn
 import torch.multiprocessing as mp
+from torch.utils.tensorboard import SummaryWriter
 
 def parse_args():
     parse = argparse.ArgumentParser()
@@ -19,10 +21,14 @@ def parse_args():
     parse.add_argument('--beta', default=0.001, type=int, help='KL constraint on the change of policy')
     parse.add_argument('--gamma', default=0.999, type=int, help='discount factor')
     parse.add_argument('--epsilons', default='0.005,0.01', type=str, help='epsilon of different objective')
+    parse.add_argument('--eps', default=1., type=float, help='epsilon for exploration')
+    parse.add_argument('--eps_min', default=0.1, type=int, help='minimum of epsilon for exploration')
+    parse.add_argument('--eps_decay', default=10000, type=int, help='minimum of epsilon for exploration')
     parse.add_argument('--test_only', default=False, action='store_true')
-    parse.add_argument('--train_iter', default=10000, type=int, help='training iterations')
+    parse.add_argument('--train_iter', default=30000, type=int, help='training iterations')
     parse.add_argument('--test_iter', default=10, type=int, help='testing iterations')
     parse.add_argument('--device', default='cpu', type=str, help='device')
+    parse.add_argument('--seed', default=10, type=int, help='random seed')
     parse.add_argument('--multiprocess', default=1, type=int, help='how many process for asynchronous actor')
 
     args = parse.parse_args()
@@ -30,47 +36,72 @@ def parse_args():
     return args
 
 
-def SingleTrain(agent: GaussianMOMPO, args, k):
-    Transition = namedtuple(
-        'Transition', ('state', 'action', 'log_prob', 'reward', 'done'))
+def SingleTrain(agent: CategoricalMOMPO, args, k):
     env = args.env
     device = args.device
 
-    for i in range(args.train_iter): 
+    writer = SummaryWriter(args.logdir)
+    stop_episode = 30
+    stop_episode_reward = np.zeros((k))
+    i = 0
+    while True:
+        i += 1
         state = env.reset()
         t = 0
         episode_reward = np.zeros((k))
         trajectory = []
         while True:
-            action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
-            next_state, reward, done = env.step(action)
-            trajectory.append(Transition(state, [action], reward, [log_prob], [int(done)]))
+            action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device), 0)
+            next_state, reward, done = env.step(action[0])
+            trajectory.append((state, action, reward, log_prob, [int(done)]))
             state = next_state
             episode_reward += reward
             t += 1
+            args.eps -= (1 - args.eps_min) / args.eps_decay
+            args.eps = max(args.eps, args.eps_min)
             if done:
                 break
 
-        print(f"Episode: {i}, length: {t} ")
-        for i in range(episode_reward.shape[0]):
-            print(f'reward{i}: {episode_reward[i]} ', end='')
-        print()
-
         agent._replay_buffer.push(trajectory)
     
-        agent.update()
+        agent.update(i)
+
+        # print result
+        print(f"Episode: {i}, length: {t} ", end='')
+        for j in range(episode_reward.shape[0]):
+            print(f'reward{j}: {episode_reward[j]} ', end='')
+        print()
+
+        # log result in tensorboard
+        for j in range(episode_reward.shape[0]):
+            writer.add_scalar(f'reward_{j}', episode_reward[j], i)
+
+        # check convergence
+        if np.array_equal(episode_reward, stop_episode_reward):
+            print(stop_episode)
+            stop_episode -= 1
+            if stop_episode == 0:
+                with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
+                    f.write(f'Epsiode: {i}\n')
+                    f.write('Converge at: ')
+                    for j in range(episode_reward.shape[0]):
+                        f.write(f'reward{j}: {episode_reward[j]} ')
+                break
+        else:
+            stop_episode = 30
+            stop_episode_reward = episode_reward
 
     agent.save(args.logdir)
 
 
+
+
 def MultiTrain(shared_actor, args, k, state_dim, action_dim):
-    Transition = namedtuple(
-        'Transition', ('state', 'action', 'log_prob', 'reward', 'done'))
     env = args.env
     device = args.device
 
     # asyncronous actor
-    agent = BehaviorGaussianMPO(state_dim, action_dim)
+    agent = BehaviorCategoricalMPO(state_dim, action_dim)
 
     for i in range(args.train_iter): 
         # load new actor
@@ -86,7 +117,7 @@ def MultiTrain(shared_actor, args, k, state_dim, action_dim):
         while True:
             action, log_prob = agent.select_action(torch.tensor(state, device=device))
             next_state, reward, done = env.step(action)
-            trajectory.append(Transition(state, [action], reward, [log_prob], [int(done)]))
+            trajectory.append((state, [action], reward, [log_prob], [int(done)]))
             state = next_state
             episode_reward += reward
             t += 1
@@ -101,7 +132,7 @@ def MultiTrain(shared_actor, args, k, state_dim, action_dim):
         # replay_buffer.push(trajectory)
 
 
-def Learner(agent: GaussianMOMPO, ps):
+def Learner(agent: CategoricalMOMPO, ps):
     all_ps_finish = False
     t = 0
     while not all_ps_finish:
@@ -114,7 +145,7 @@ def Learner(agent: GaussianMOMPO, ps):
                 break
 
 
-def test(agent: GaussianMOMPO, args, k):
+def test(agent: CategoricalMOMPO, args, k):
     rewards = []
     agent._actor.eval()
 
@@ -147,21 +178,25 @@ def test(agent: GaussianMOMPO, args, k):
 def main():
     # TODO: change GaussianMOMPO to Categorical MOMPO
     args = parse_args()
-    args.logdir = os.path.join(args.logdir, args.env)
+    args.logdir = os.path.join(args.logdir, args.env, args.epsilons)
     os.makedirs(args.logdir, exist_ok=True)
+
+    # set random seed
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     if args.env == 'DeepSeaTreasure':
         args.env = DeepSeaTreasure()
         k = 2
         state_dim = len(args.env.state_spec)
-        action_dim = 1
+        action_dim = 4
     else:
         raise NotImplementedError
 
     args.epsilons = np.array([float(x) for x in args.epsilons.split(',')])
 
-    # agent = GaussianMOMPO(state_dim, action_dim, beta=args.beta, gamma=args.gamma, epsilon=args.epsilons)
-    agent = GaussianMOMPO(state_dim, action_dim, gamma=args.gamma, epsilon=args.epsilons)
+    agent = CategoricalMOMPO(state_dim, action_dim, gamma=args.gamma, epsilon=args.epsilons, beta=args.beta, k=k)
     agent._actor.share_memory()
 
     if args.model != '':
