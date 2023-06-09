@@ -261,8 +261,10 @@ class GaussianMPO(BehaviorGaussianMPO):
             loss_alpha_mean: loss of fixed std distribution
             loss_alpha_std: loss of fixed mean distribution
         '''
+        alpha_mean, alpha_std = F.softplus(self._alpha_mean), F.softplus(self._alpha_std)
+
         mean, std = self._actor(states)  # (batch_size, action_dim)
-        target_distribution = Normal(mean, std)
+        target_distribution = Normal(target_mean, target_std)
         fixed_std_distribution = Normal(mean, target_std)
         fixed_mean_distribution = Normal(target_mean, std)
 
@@ -275,11 +277,11 @@ class GaussianMPO(BehaviorGaussianMPO):
                                 normalized_weights.sum(dim=-1, keepdim=True).permute(1, 0, 2) # [N, B, D]
         loss_fixed_mean = torch.sum(loss_fixed_mean.mean(dim=1))
 
-        loss_beta_mean = self._alpha_mean.detach() * \
+        loss_beta_mean = alpha_mean.detach() * \
                             (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)) # [B, D]
         loss_beta_mean = torch.sum(loss_beta_mean.mean(dim=0))
 
-        loss_beta_std = self._alpha_std.detach() * \
+        loss_beta_std = alpha_std.detach() * \
                             (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)) # [B, D]
         loss_beta_std = torch.sum(loss_beta_std.mean(dim=0))
         
@@ -290,7 +292,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         self._actor_optimizer.step()
 
         # update alpha std
-        loss_alpha_std = self._alpha_std * \
+        loss_alpha_std = alpha_std * \
                         (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)).detach() # [B, D]
         loss_alpha_std = torch.sum(loss_alpha_std.mean(dim=0))
         self._alpha_std_optimizer.zero_grad()
@@ -299,7 +301,7 @@ class GaussianMPO(BehaviorGaussianMPO):
 
 
         # update alpha mean
-        loss_alpha_mean = self._alpha_mean * \
+        loss_alpha_mean = alpha_mean * \
                         (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)).detach() # [B, D]
         loss_alpha_mean = torch.sum(loss_alpha_mean.mean(dim=0))
         self._alpha_mean_optimizer.zero_grad()
@@ -818,9 +820,12 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             for i in range(self._actions_sample_per_state):
                 target_action = target_distribution.sample().view(-1, 1)  # (B, 1)
                 target_actions.append(target_action)
-                action = torch.zeros_like((target_action_probs)).to(self._device) # (B, D), for critic input
+
+                # `action`: one-hot encoding of `target_action` for critic input
+                action = torch.zeros_like((target_action_probs)).to(self._device) # (B, D)
                 for i in range(target_action.shape[0]):
                     action[i][target_action[i].item()] = 1
+                
                 q_value.append(self._target_critic(states, action)) # (B, K)
 
         target_actions = torch.stack(target_actions, dim=1) # (B, N, 1)
@@ -884,7 +889,8 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         self._actor_optimizer.step()
 
         # update alpha
-        loss_alpha = self._alpha * \
+        alpha = F.softplus(self._alpha)
+        loss_alpha = alpha * \
                         (self._beta - kl_divergence(target_distribution, online_distribution).detach()) # (B,)
         loss_alpha = torch.mean(loss_alpha)
         self._alpha_optimizer.zero_grad()
@@ -908,7 +914,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             actions_ = torch.zeros((actions.shape[0] + 1, self._action_dim)).to(self._device) # (B + 1, D); input for critic
             for i in range(actions.shape[0]):
                 actions_[i, int(actions[i].item())] = 1
-            target_q_values = rewards + self._gamma * self._critic(states[1:], actions_[1:]) * (1 - dones)
+            target_q_values = rewards + self._gamma * self._target_critic(states[1:], actions_[1:]) * (1 - dones)
 
         q_values = self._critic(states[:-1], actions_[:-1]) # (T, K)
         criterion = F.mse_loss
@@ -973,12 +979,13 @@ class CategoricalMOMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
-        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
+        tempered_q_values = q_value / self._temperatures.view(1, 1, -1)  # (B, N, K)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
-        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
