@@ -707,7 +707,7 @@ class BehaviorCategoricalMPO(MPO):
         '''
         with torch.no_grad():
             action_prob = self._actor(state)
-        m = Categorical(action_prob)
+        m = Categorical(logits=action_prob)
         if random.random() < epsilon:
             action = torch.tensor(random.randint(0, self._action_dim - 1))
         else:
@@ -816,13 +816,13 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         q_value = []
         with torch.no_grad():
             target_action_probs = self._target_actor(states) # (B, D)
-            target_distribution = Categorical(target_action_probs)
+            target_distribution = Categorical(logits=target_action_probs)
             for i in range(self._actions_sample_per_state):
                 target_action = target_distribution.sample().view(-1, 1)  # (B, 1)
                 target_actions.append(target_action)
 
                 # `action`: one-hot encoding of `target_action` for critic input
-                action = torch.zeros_like((target_action_probs)).to(self._device) # (B, D)
+                action = torch.zeros_like(target_action_probs).to(self._device) # (B, D)
                 for i in range(target_action.shape[0]):
                     action[i][target_action[i].item()] = 1
                 
@@ -872,8 +872,8 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         '''
         alpha = F.softplus(self._alpha)
         action_probs = self._actor(states)  # (B, D)
-        online_distribution = Categorical(action_probs)
-        target_distribution = Categorical(target_action_probs)
+        online_distribution = Categorical(logits=action_probs)
+        target_distribution = Categorical(logits=target_action_probs)
         kl_loss = kl_divergence(target_distribution, online_distribution)
 
         # average over the batch

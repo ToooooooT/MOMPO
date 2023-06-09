@@ -60,10 +60,10 @@ class CategoricalPolicy(Policy):
         '''
         super().__init__(input_dim, layer_size, output_dim, device)
 
-        # output normalized probabilities of each categories of actions, different from the papaer
+        # output the logits of every actions
         self.output = nn.Sequential(
-            nn.Linear(layer_size[-1], output_dim),
-            nn.Softmax(dim=-1))
+            nn.Linear(layer_size[-1], output_dim)
+        )
 
     def forward(self, input):
         '''
@@ -107,6 +107,9 @@ class Critic(nn.Module):
 
     def forward(self, state, action):
         '''
+        Args:
+            state: expected shape (B, S)
+            action: expected shape (B, D)
         Returns:
             y : expected shape (B, K)
         '''
