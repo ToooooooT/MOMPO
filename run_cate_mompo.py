@@ -37,7 +37,10 @@ def parse_args():
     return args
 
 
-def SingleTrain(agent: CategoricalMOMPO, args, k):
+action_repr = ['U', 'D', 'L', 'R']
+
+
+def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
     env = args.env
     device = args.device
 
@@ -55,6 +58,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k):
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device), 0)
             next_state, reward, done = env.step(action[0])
             trajectory.append((state, action, reward, log_prob, [int(done)]))
+            agent._replay_buffer.push(state, action, reward, next_state, log_prob, np.array([int(done)]))
             state = next_state
             episode_reward += reward
             t += 1
@@ -64,7 +68,6 @@ def SingleTrain(agent: CategoricalMOMPO, args, k):
                 break
 
         writer.add_scalar('eps', args.eps, i)
-        agent._replay_buffer.push(trajectory)
     
         loss = agent.update(i)
         writer.add_scalar('alpha', agent._alpha, i)
@@ -75,6 +78,14 @@ def SingleTrain(agent: CategoricalMOMPO, args, k):
         for j in range(episode_reward.shape[0]):
             print(f'reward{j}: {episode_reward[j]} ', end='')
         print()
+
+        # print the transitions
+        if i % 20 == 0 and verbose:
+            states = [trans[0].tolist() for trans in trajectory] + [state.tolist()]
+            actions = [action_repr[trans[1][0]] for trans in trajectory]
+            trans = list(zip(states[:-1], actions, states[1:]))
+            print(*trans, sep='\n')
+            
 
         # log result in tensorboard
         for j in range(episode_reward.shape[0]):
