@@ -117,7 +117,8 @@ class GaussianMPO(BehaviorGaussianMPO):
                  beta_std=0.00001, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -172,8 +173,8 @@ class GaussianMPO(BehaviorGaussianMPO):
         self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True).to(device)
         self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True).to(device)
 
-        self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=lr, eps=adam_eps)
-        self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=lr, eps=adam_eps)
+        self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=dual_lr, eps=adam_eps)
+        self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=dual_lr, eps=adam_eps)
 
         # constraint on KL divergence
         self._beta_mean = beta_mean
@@ -350,7 +351,8 @@ class GaussianMOMPO(GaussianMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -373,6 +375,7 @@ class GaussianMOMPO(GaussianMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -382,7 +385,7 @@ class GaussianMOMPO(GaussianMPO):
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
     def update_temperature(self, q_value: torch.Tensor):
@@ -426,7 +429,8 @@ class GaussianScalarizedMPO(GaussianMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -449,6 +453,7 @@ class GaussianScalarizedMPO(GaussianMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -458,7 +463,7 @@ class GaussianScalarizedMPO(GaussianMPO):
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
         self._weight = torch.tensor(weight).to(device)
 
@@ -504,7 +509,8 @@ class GaussianMOMPOHumanoid(GaussianMOMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -528,6 +534,7 @@ class GaussianMOMPOHumanoid(GaussianMOMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -593,7 +600,8 @@ class GaussianScalarizedMPOHumanoid(GaussianScalarizedMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -618,6 +626,7 @@ class GaussianScalarizedMPOHumanoid(GaussianScalarizedMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -730,7 +739,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                  batch_size=512, 
                  replay_buffer_size=1000000, 
                  lr=3e-4, 
-                 dual_lr=1e-2,
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -958,7 +967,7 @@ class CategoricalMOMPO(CategoricalMPO):
                  batch_size=512, 
                  replay_buffer_size=1000000, 
                  lr=3e-4,
-                 dual_lr=1e-2, 
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -1029,7 +1038,8 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -1048,6 +1058,7 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
