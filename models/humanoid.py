@@ -62,8 +62,7 @@ class CategoricalPolicy(Policy):
 
         # output the logits of every actions
         self.output = nn.Sequential(
-            nn.Linear(layer_size[-1], output_dim),
-            nn.Tanh()
+            nn.Linear(layer_size[-1], output_dim)
         )
 
     def forward(self, input):

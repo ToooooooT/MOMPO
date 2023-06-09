@@ -117,7 +117,8 @@ class GaussianMPO(BehaviorGaussianMPO):
                  beta_std=0.00001, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -172,8 +173,8 @@ class GaussianMPO(BehaviorGaussianMPO):
         self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True).to(device)
         self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True).to(device)
 
-        self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=lr, eps=adam_eps)
-        self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=lr, eps=adam_eps)
+        self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=dual_lr, eps=adam_eps)
+        self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=dual_lr, eps=adam_eps)
 
         # constraint on KL divergence
         self._beta_mean = beta_mean
@@ -261,7 +262,7 @@ class GaussianMPO(BehaviorGaussianMPO):
             loss_alpha_mean: loss of fixed std distribution
             loss_alpha_std: loss of fixed mean distribution
         '''
-        alpha_mean, alpha_std = F.softplus(self._alpha_mean), F.softplus(self._alpha_std)
+        alpha_mean, alpha_std = F.softplus(self._alpha_mean) + 1e-8, F.softplus(self._alpha_std) + 1e-8
 
         mean, std = self._actor(states)  # (batch_size, action_dim)
         target_distribution = Normal(target_mean, target_std)
@@ -350,7 +351,8 @@ class GaussianMOMPO(GaussianMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -373,6 +375,7 @@ class GaussianMOMPO(GaussianMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -382,7 +385,7 @@ class GaussianMOMPO(GaussianMPO):
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
     def update_temperature(self, q_value: torch.Tensor):
@@ -394,12 +397,13 @@ class GaussianMOMPO(GaussianMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
-        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
+        temperatures = F.softplus(self._temperatures) + 1e-8
+        tempered_q_values = q_value / temperatures.reshape(1, 1, self._k)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
-        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
@@ -426,7 +430,8 @@ class GaussianScalarizedMPO(GaussianMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -449,6 +454,7 @@ class GaussianScalarizedMPO(GaussianMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -458,7 +464,7 @@ class GaussianScalarizedMPO(GaussianMPO):
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
         self._weight = torch.tensor(weight).to(device)
 
@@ -472,13 +478,14 @@ class GaussianScalarizedMPO(GaussianMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, 1]
         '''
+        temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
-                            / self._temperatures.reshape(1, 1, 1) # (B, N, 1)
+                            / temperatures.reshape(1, 1, 1) # (B, N, 1)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
 
-        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
@@ -504,7 +511,8 @@ class GaussianMOMPOHumanoid(GaussianMOMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -528,6 +536,7 @@ class GaussianMOMPOHumanoid(GaussianMOMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -593,7 +602,8 @@ class GaussianScalarizedMPOHumanoid(GaussianScalarizedMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -618,6 +628,7 @@ class GaussianScalarizedMPOHumanoid(GaussianScalarizedMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -730,7 +741,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                  batch_size=512, 
                  replay_buffer_size=1000000, 
                  lr=3e-4, 
-                 dual_lr=1e-2,
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -833,7 +844,8 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         q_value = torch.stack(q_value, dim=1) # (B, N, K)
 
         # update temperature
-        loss_temperature, normalized_weights = self.update_temperature(q_value)
+        target_log_probs = target_distribution.log_prob(target_actions.squeeze().T)  # (N, B)
+        loss_temperature, normalized_weights = self.update_temperature(q_value, target_log_probs.T)
 
         # update policy
         loss_policy, loss_alpha, kl_loss = self.update_policy(states, target_actions, target_action_probs, normalized_weights)
@@ -871,7 +883,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             loss: policy loss
             loss_alpha: loss of distribution
         '''
-        alpha = F.softplus(self._alpha)
+        alpha = F.softplus(self._alpha) + 1e-8  # avoid zero value
         action_probs = self._actor(states)  # (B, D)
         online_distribution = Categorical(logits=action_probs)
         target_distribution = Categorical(logits=target_action_probs)
@@ -958,7 +970,7 @@ class CategoricalMOMPO(CategoricalMPO):
                  batch_size=512, 
                  replay_buffer_size=1000000, 
                  lr=3e-4,
-                 dual_lr=1e-2, 
+                 dual_lr=1e-3, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -989,22 +1001,25 @@ class CategoricalMOMPO(CategoricalMPO):
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
-    def update_temperature(self, q_value: torch.Tensor):
+    def update_temperature(self, q_value: torch.Tensor, target_log_probs):
         '''
         Args:
             q_value: Q-values associated with the actions sampled from the target policy; 
                 expected shape [B, N, K]
+            target_log_probs: a categorical distribution with logits in shape (B, N)
         Returns:
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
-        tempered_q_values = q_value / self._temperatures.view(1, 1, -1)  # (B, N, K)
+        temperatures = F.softplus(self._temperatures) + 1e-8
+        tempered_q_values = q_value / temperatures.view(1, 1, -1)  # (B, N, K)
+        unnormalized_logits = target_log_probs.view(*target_log_probs.size(), 1) + tempered_q_values
 
         # compute normlized importance weights
-        normalized_weights = F.softmax(tempered_q_values, dim=1)
+        normalized_weights = F.softmax(unnormalized_logits, dim=1)
 
-        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) \
-                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.log(torch.exp(unnormalized_logits).mean(dim=1)).mean(dim=0))  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
@@ -1029,7 +1044,8 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-3,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -1048,6 +1064,7 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -1070,13 +1087,14 @@ class CategoricalScalarizedMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, 1]
         '''
+        temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
-                            / self._temperatures.reshape(1, 1, 1) # (B, N, 1)
+                            / temperatures.reshape(1, 1, 1) # (B, N, 1)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
 
-        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
