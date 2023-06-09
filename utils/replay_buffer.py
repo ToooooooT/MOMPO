@@ -1,20 +1,53 @@
 import random
+from typing import List, Tuple
 import numpy as np
 import torch
 
-class replay_buffer():
-    def __init__(self, replay_buffer_size) -> None:
-        self._size = replay_buffer_size
-        self._trajectory_buffer = [None] * replay_buffer_size
+
+class ReplayBuffer:
+    """The replay buffer storing the transitions.
+
+    Attributes:
+        _size: the replay buffer size
+        _storage: a list storing the transition tuples.
+        _idx: the index of the last transition
+        _isfull: once if _idx == _size-1
+    """
+    def __init__(self, buffer_size) -> None:
+        self._size = buffer_size
+        self._storage: List[Tuple] = [None] * buffer_size
         self._idx = 0
         self._isfull = False
 
-
-    def push(self, trajectory):
-        self._trajectory_buffer[self._idx] = trajectory
+    def push(self, state, action, reward, next_state, log_prob, done):
+        """
+        Args:
+            transition: (s(t), a(t), r(t), s(t+1), log(pi(a|s)), done)
+        """
+        self._storage[self._idx] = (state, action, reward, next_state, log_prob, done)
         self._idx = (self._idx + 1) % self._size
         if not self._isfull and self._idx == self._size - 1:
             self._isfull = True
+
+
+    def sample(self, batch_size):
+        """
+        Returns:
+            states : expected shape (B, S)
+            actions : expected shape (B, 1)
+            rewards : expected shape (B, K)
+            next_states : expected shape (B, S)
+            log_probs : expected shape (B, 1)
+            dones : expected shape (B, 1)
+        """
+        if self._isfull:
+            sampled_idx = np.random.randint(0, self._size, size=batch_size)
+        else:
+            sampled_idx = np.random.randint(0, self._idx, size=batch_size)
+
+        samples = [self._storage[idx] for idx in sampled_idx]
+
+        return tuple(torch.tensor(np.array(x), dtype=torch.float) for x in zip(*samples))
 
 
     def sample_states(self, batch_size):
@@ -22,29 +55,16 @@ class replay_buffer():
         Returns:
             states : expected shape (B, S)
         '''
-        if self._isfull:
-            traj_idx = [random.randint(0, self._size - 1) for i in range(batch_size)]
-        else:
-            traj_idx = [random.randint(0, self._idx - 1) for i in range(batch_size)]
-        states = []
-        for idx in traj_idx:
-            i = random.randint(0, len(self._trajectory_buffer[idx]) - 1)
-            states.append(self._trajectory_buffer[idx][i][0])
+        return self.sample(batch_size)[0]
+    
 
-        return torch.tensor(np.array(states), dtype=torch.float)
+class RetraceBuffer:
+    def __init__(self, buffer_size, retrace_size):
+        self._size = buffer_size
+        self._retrace_size = retrace_size
+        self._storage: List[Tuple] = [None] * buffer_size
+        self._idx = 0
+        self._isfull = False
 
-
-    def sample_trajectories(self):
-        '''
-        Returns:
-            states : expected shape (T, S)
-            actions : expected shape (T, D)
-            rewards : expected shape (T, K)
-            log_probs : expected shape (T, 1)
-            dones : expected shape (T, 1)
-        '''
-        if self._isfull:
-            idx = random.randint(0, self._size - 1)
-        else:
-            idx = random.randint(0, self._idx - 1)
-        return (torch.tensor(np.array(x), dtype=torch.float) for x in zip(*self._trajectory_buffer[idx]))
+    def push(self, transitions):
+        pass

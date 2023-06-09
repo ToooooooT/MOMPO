@@ -58,6 +58,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device), 0)
             next_state, reward, done = env.step(action[0])
             trajectory.append((state, action, reward, log_prob, [int(done)]))
+            agent._replay_buffer.push(state, action, reward, next_state, log_prob, np.array([int(done)]))
             state = next_state
             episode_reward += reward
             t += 1
@@ -67,7 +68,6 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
                 break
 
         writer.add_scalar('eps', args.eps, i)
-        agent._replay_buffer.push(trajectory)
     
         loss = agent.update(i)
         writer.add_scalar('alpha', agent._alpha, i)
