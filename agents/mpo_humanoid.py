@@ -262,7 +262,7 @@ class GaussianMPO(BehaviorGaussianMPO):
             loss_alpha_std: loss of fixed mean distribution
         '''
         mean, std = self._actor(states)  # (batch_size, action_dim)
-        target_distribution = Normal(mean, std)
+        target_distribution = Normal(target_mean, target_std)
         fixed_std_distribution = Normal(mean, target_std)
         fixed_mean_distribution = Normal(target_mean, std)
 
