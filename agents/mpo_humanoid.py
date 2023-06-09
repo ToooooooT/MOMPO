@@ -914,7 +914,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             actions_ = torch.zeros((actions.shape[0] + 1, self._action_dim)).to(self._device) # (B + 1, D); input for critic
             for i in range(actions.shape[0]):
                 actions_[i, int(actions[i].item())] = 1
-            target_q_values = rewards + self._gamma * self._critic(states[1:], actions_[1:]) * (1 - dones)
+            target_q_values = rewards + self._gamma * self._target_critic(states[1:], actions_[1:]) * (1 - dones)
 
         q_values = self._critic(states[:-1], actions_[:-1]) # (T, K)
         criterion = F.mse_loss
