@@ -729,7 +729,8 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                  beta=0.001, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4, 
+                 dual_lr=1e-2,
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -778,7 +779,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         # trainable values
         self._alpha = torch.tensor(np.array([alpha]), requires_grad=True).to(device)
 
-        self._alpha_optimizer = optim.Adam([self._alpha], lr=lr, eps=adam_eps)
+        self._alpha_optimizer = optim.Adam([self._alpha], lr=dual_lr, eps=adam_eps)
 
         # constraint on KL divergence
         self._beta = beta
@@ -956,7 +957,8 @@ class CategoricalMOMPO(CategoricalMPO):
                  temperature=1, 
                  batch_size=512, 
                  replay_buffer_size=1000000, 
-                 lr=0.0003, 
+                 lr=3e-4,
+                 dual_lr=1e-2, 
                  adam_eps=0.001, 
                  target_update_freq=200, 
                  device='cpu', 
@@ -975,6 +977,7 @@ class CategoricalMOMPO(CategoricalMPO):
                          batch_size, 
                          replay_buffer_size, 
                          lr, 
+                         dual_lr,
                          adam_eps, 
                          target_update_freq, 
                          device, 
@@ -983,7 +986,7 @@ class CategoricalMOMPO(CategoricalMPO):
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
-        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
     def update_temperature(self, q_value: torch.Tensor):
