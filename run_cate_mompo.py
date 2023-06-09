@@ -205,7 +205,7 @@ def main():
                              epsilon=args.epsilons, 
                              beta=args.beta, 
                              k=k, 
-                             alpha=args.alpha)
+                             alpha=float(args.alpha))
     agent._actor.share_memory()
 
     if args.model != '':
