@@ -870,6 +870,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             loss: policy loss
             loss_alpha: loss of distribution
         '''
+        alpha = F.softplus(self._alpha)
         action_probs = self._actor(states)  # (B, D)
         online_distribution = Categorical(action_probs)
         target_distribution = Categorical(target_action_probs)
@@ -880,7 +881,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                                         normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
         loss_policy = torch.sum(loss_policy.mean(dim=1))
 
-        loss_beta = self._alpha.detach() * \
+        loss_beta = alpha.detach() * \
                         (self._beta - kl_loss) # (B,)
         loss_beta = torch.mean(loss_beta)
 
@@ -891,7 +892,6 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         self._actor_optimizer.step()
 
         # update alpha
-        alpha = F.softplus(self._alpha)
         loss_alpha = alpha * \
                         (self._beta - kl_loss.detach()) # (B,)
         loss_alpha = torch.mean(loss_alpha)
