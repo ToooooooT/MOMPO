@@ -72,6 +72,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
         loss = agent.update(i)
         writer.add_scalar('alpha', agent._alpha, i)
         writer.add_scalars('loss', loss, i)
+        writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), i)
 
         # print result
         print(f"Episode: {i}, length: {t} ", end='')
