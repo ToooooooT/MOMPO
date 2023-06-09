@@ -835,7 +835,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         loss_temperature, normalized_weights = self.update_temperature(q_value)
 
         # update policy
-        loss_policy, loss_alpha = self.update_policy(states, target_actions, target_action_probs, normalized_weights)
+        loss_policy, loss_alpha, kl_loss = self.update_policy(states, target_actions, target_action_probs, normalized_weights)
 
         # update critic
         loss_critic = self.update_critic()
@@ -847,7 +847,8 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         loss = {'loss_temperature': loss_temperature,
                 'loss_policy': loss_policy,
                 'loss_alpha': loss_alpha,
-                'loss_critic': loss_critic}
+                'loss_critic': loss_critic, 
+                'kl_loss': kl_loss}
 
         return loss
 
@@ -872,6 +873,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         action_probs = self._actor(states)  # (B, D)
         online_distribution = Categorical(action_probs)
         target_distribution = Categorical(target_action_probs)
+        kl_loss = kl_divergence(target_distribution, online_distribution)
 
         # average over the batch
         loss_policy = -online_distribution.log_prob(target_actions.squeeze().transpose(1, 0)) * \
@@ -879,7 +881,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         loss_policy = torch.sum(loss_policy.mean(dim=1))
 
         loss_beta = self._alpha.detach() * \
-                        (self._beta - kl_divergence(target_distribution, online_distribution)) # (B,)
+                        (self._beta - kl_loss) # (B,)
         loss_beta = torch.mean(loss_beta)
 
         # policy optimization
@@ -891,13 +893,13 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         # update alpha
         alpha = F.softplus(self._alpha)
         loss_alpha = alpha * \
-                        (self._beta - kl_divergence(target_distribution, online_distribution).detach()) # (B,)
+                        (self._beta - kl_loss.detach()) # (B,)
         loss_alpha = torch.mean(loss_alpha)
         self._alpha_optimizer.zero_grad()
         loss_alpha.backward()
         self._alpha_optimizer.step()
 
-        return loss.detach().cpu().item(), loss_alpha.detach().cpu().item()
+        return loss.detach().cpu().item(), loss_alpha.detach().cpu().item(), kl_loss.detach().mean().cpu().item()
 
 
     def update_critic(self):
