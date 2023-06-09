@@ -818,9 +818,12 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             for i in range(self._actions_sample_per_state):
                 target_action = target_distribution.sample().view(-1, 1)  # (B, 1)
                 target_actions.append(target_action)
-                action = torch.zeros_like((target_action_probs)).to(self._device) # (B, D), for critic input
+
+                # `action`: one-hot encoding of `target_action` for critic input
+                action = torch.zeros_like((target_action_probs)).to(self._device) # (B, D)
                 for i in range(target_action.shape[0]):
                     action[i][target_action[i].item()] = 1
+                
                 q_value.append(self._target_critic(states, action)) # (B, K)
 
         target_actions = torch.stack(target_actions, dim=1) # (B, N, 1)
@@ -973,12 +976,13 @@ class CategoricalMOMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
-        tempered_q_values = q_value / self._temperatures.reshape(1, 1, self._k)
+        tempered_q_values = q_value / self._temperatures.view(1, 1, -1)  # (B, N, K)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
-        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        loss = self._temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
