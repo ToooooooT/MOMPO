@@ -18,6 +18,7 @@ def parse_args():
     parse.add_argument('--logdir', default='./logs', type=str, help='base directory to save log')
     parse.add_argument('--model', default='', type=str, help='pretrained model path')
     parse.add_argument('--env', default='DeepSeaTreasure', type=str, help='environment name')
+    parse.add_argument('--alpha', default=1., type=str, help='the Lagrangian multiplier for the policy update constraint')
     parse.add_argument('--beta', default=0.001, type=int, help='KL constraint on the change of policy')
     parse.add_argument('--gamma', default=0.999, type=int, help='discount factor')
     parse.add_argument('--epsilons', default='0.005,0.01', type=str, help='epsilon of different objective')
@@ -41,7 +42,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k):
     device = args.device
 
     writer = SummaryWriter(args.logdir)
-    stop_episode = 30
+    stop_episode = 100
     stop_episode_reward = np.zeros((k))
     i = 0
     while True:
@@ -62,9 +63,12 @@ def SingleTrain(agent: CategoricalMOMPO, args, k):
             if done:
                 break
 
+        writer.add_scalar('eps', args.eps, i)
         agent._replay_buffer.push(trajectory)
     
-        agent.update(i)
+        loss = agent.update(i)
+        writer.add_scalar('alpha', agent._alpha, i)
+        writer.add_scalars('loss', loss, i)
 
         # print result
         print(f"Episode: {i}, length: {t} ", end='')
@@ -88,7 +92,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k):
                         f.write(f'reward{j}: {episode_reward[j]} ')
                 break
         else:
-            stop_episode = 30
+            stop_episode = 100
             stop_episode_reward = episode_reward
 
     agent.save(args.logdir)
@@ -196,11 +200,16 @@ def main():
 
     args.epsilons = np.array([float(x) for x in args.epsilons.split(',')])
 
-    agent = CategoricalMOMPO(state_dim, action_dim, gamma=args.gamma, epsilon=args.epsilons, beta=args.beta, k=k)
+    agent = CategoricalMOMPO(state_dim, action_dim,
+                             gamma=args.gamma, 
+                             epsilon=args.epsilons, 
+                             beta=args.beta, 
+                             k=k, 
+                             alpha=args.alpha)
     agent._actor.share_memory()
 
     if args.model != '':
-        agent.load(args.modeldir)
+        agent.load(args.model)
 
     if args.test_only:
         test(agent, args, k)
