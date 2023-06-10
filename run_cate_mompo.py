@@ -101,6 +101,8 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
 
         if i % 100 == 0:
             avg_reward = test(agent, args, k)
+            for j in range(avg_reward.shape[0]):
+                writer.add_scalar(f'test_reward_{j}', avg_reward[j], t)
 
 
 def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
@@ -112,7 +114,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
     agent._actor.train()
     print_freq = 100
     episode_reward = np.zeros((k))
-    for i in range(args.train_iter): 
+    for i in range(1, int(args.train_iter) + 1): 
         replay_buffer = []
         try:
             actor = actor_q.get_nowait()
@@ -239,7 +241,8 @@ def main():
                              k=k, 
                              alpha=args.alpha,
                              dual_lr=args.dual_lr,
-                             replay_buffer_size=int(args.replay_buffer_size))
+                             replay_buffer_size=int(args.replay_buffer_size),
+                             device=args.device)
     agent._actor.share_memory()
 
     if args.model != '':
