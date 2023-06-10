@@ -803,6 +803,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             self._replay_buffer = PrioritizedReplayMemory(replay_buffer_size, priority_alpha, priority_beta_start, priority_beta_frames)
         else:
             self._replay_buffer = ReplayBuffer(replay_buffer_size)
+        self._use_priority = use_priority
 
         # copy target netwrok
         self.hard_update(self._target_actor, self._actor)
@@ -952,13 +953,14 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
         q_values = self._critic(states, actions_onehot) # (T, K)
         criterion = F.mse_loss
-        loss = criterion(q_values, target_q_values)
-        critic_loss = loss.sum(dim=-1)
+        loss = criterion(q_values, target_q_values, reduction='none')
+        critic_loss = loss.sum(dim=-1).mean(dim=-1)
         self._critic_optimizer.zero_grad()
         critic_loss.backward()
         self._critic_optimizer.step()
 
-        self._replay_buffer.update_priorities(idxes, loss.detach().cpu().tolist())
+        if self._use_priority:
+            self._replay_buffer.update_priorities(idxes, loss.detach().cpu()[:, 0].tolist())
         
         return critic_loss.detach().cpu().item()
 
