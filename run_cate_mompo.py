@@ -116,13 +116,6 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
     episode_reward = np.zeros((k))
     for i in range(1, int(args.train_iter) + 1): 
         replay_buffer = []
-        try:
-            actor = actor_q.get_nowait()
-            if actor:
-                agent._actor.load_state_dict(actor)
-        except:
-            pass
-
         state = env.reset()
         t = 0
         while True:
@@ -145,6 +138,13 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
             episode_reward = np.zeros((k))
 
         replay_buffer_q.put_nowait(replay_buffer)
+        try:
+            actor = actor_q.get_nowait()
+            if actor:
+                agent._actor.load_state_dict(actor)
+                agent._actor.train()
+        except:
+            pass
 
 
 def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
