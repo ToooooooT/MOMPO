@@ -53,7 +53,6 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
     # total_step = 0
     for i in range(1, int(args.train_iter + 1)):
         agent._actor.train()
-        i += 1
         state = env.reset()
         t = 0
         episode_reward = np.zeros((k))
@@ -257,7 +256,6 @@ def main():
             p.join()
     else:
         SingleTrain(agent, args, k)
-
 
 if __name__ == '__main__':
     main()
