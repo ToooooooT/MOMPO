@@ -170,8 +170,8 @@ class GaussianMPO(BehaviorGaussianMPO):
         self._critic_optimizer = optim.Adam(self._critic.parameters(), lr=lr, eps=adam_eps)
 
         # trainable values
-        self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True).to(device)
-        self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True).to(device)
+        self._alpha_mean = torch.tensor(np.array([alpha_mean]), requires_grad=True, device=device)
+        self._alpha_std = torch.tensor(np.array([alpha_std]), requires_grad=True, device=device)
 
         self._alpha_mean_optimizer = optim.Adam([self._alpha_mean], lr=dual_lr, eps=adam_eps)
         self._alpha_std_optimizer = optim.Adam([self._alpha_std], lr=dual_lr, eps=adam_eps)
@@ -384,7 +384,7 @@ class GaussianMOMPO(GaussianMPO):
                          alpha_std)
 
         # trainable values
-        self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True, device=device)
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
@@ -463,7 +463,7 @@ class GaussianScalarizedMPO(GaussianMPO):
                          alpha_std)
 
         # trainable values
-        self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True, device=device)
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
         self._weight = torch.tensor(weight).to(device)
@@ -788,7 +788,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         self._critic_optimizer = optim.Adam(self._critic.parameters(), lr=lr, eps=adam_eps)
 
         # trainable values
-        self._alpha = torch.tensor(np.array([alpha]), requires_grad=True).to(device)
+        self._alpha = torch.tensor(np.array([alpha]), requires_grad=True, device=device)
 
         self._alpha_optimizer = optim.Adam([self._alpha], lr=dual_lr, eps=adam_eps)
 
@@ -996,7 +996,7 @@ class CategoricalMOMPO(CategoricalMPO):
                          alpha)
 
         # trainable values
-        self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True, device=device)
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
@@ -1069,7 +1069,7 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                          alpha)
 
         # trainable values
-        self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True).to(device)
+        self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True, device=device)
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
 
         self._weight = torch.tensor(weight).to(device)
