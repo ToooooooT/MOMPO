@@ -8,7 +8,7 @@ from torch.distributions.categorical import Categorical
 from torch.distributions import kl_divergence
 
 from models.humanoid import GaussianPolicy, CategoricalPolicy, Critic
-from utils.replay_buffer import ReplayBuffer
+from utils.replay_buffer import ReplayBuffer, PrioritizedReplayMemory
 from utils.retrace import GaussianRetrace
 import numpy as np
 import random
@@ -746,7 +746,11 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                  target_update_freq=200, 
                  device='cpu', 
                  k=1, 
-                 alpha=0.001) -> None:
+                 alpha=0.001,
+                 use_priority=False,
+                 priority_alpha=0.6,
+                 priority_beta_start=0.4,
+                 priority_beta_frames=1e5) -> None:
         super().__init__(state_dim,
                          action_dim, 
                          policy_layer_size, 
@@ -795,7 +799,10 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         # constraint on KL divergence
         self._beta = beta
 
-        self._replay_buffer = ReplayBuffer(replay_buffer_size)
+        if use_priority:
+            self._replay_buffer = PrioritizedReplayMemory(replay_buffer_size, priority_alpha, priority_beta_start, priority_beta_frames)
+        else:
+            self._replay_buffer = ReplayBuffer(replay_buffer_size)
 
         # copy target netwrok
         self.hard_update(self._target_actor, self._actor)
@@ -822,7 +829,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
 
     def update(self, t):
-        states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
+        states = self._replay_buffer.sample_states(self._batch_size, device=self._device) # (B, S)
         states = states.to(self._device)
         target_actions = []
         q_value = []
@@ -915,8 +922,8 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
 
     def update_critic(self):
-        states, actions, rewards, next_states, log_probs, dones \
-            = self._replay_buffer.sample(self._batch_size)
+        states, actions, rewards, next_states, log_probs, dones, idxes, _ \
+            = self._replay_buffer.sample(self._batch_size, device=self._device)
         states = states.to(self._device).to(torch.float) # (B, S)
         actions = actions.to(self._device).to(torch.float) # (B, 1)
         rewards = rewards.to(self._device).to(torch.float) # (B, 1)
@@ -945,12 +952,15 @@ class CategoricalMPO(BehaviorCategoricalMPO):
 
         q_values = self._critic(states, actions_onehot) # (T, K)
         criterion = F.mse_loss
-        loss = criterion(q_values, target_q_values).sum(dim=-1)
+        loss = criterion(q_values, target_q_values)
+        critic_loss = loss.sum(dim=-1)
         self._critic_optimizer.zero_grad()
-        loss.backward()
+        critic_loss.backward()
         self._critic_optimizer.step()
+
+        self._replay_buffer.update_priorities(idxes, loss.detach().cpu().tolist())
         
-        return loss.detach().cpu().item()
+        return critic_loss.detach().cpu().item()
 
 
 class CategoricalMOMPO(CategoricalMPO):
@@ -974,7 +984,11 @@ class CategoricalMOMPO(CategoricalMPO):
                  target_update_freq=200, 
                  device='cpu', 
                  k=1, 
-                 alpha=0.001) -> None:
+                 alpha=0.001,
+                 use_priority=False,
+                 priority_alpha=0.6,
+                 priority_beta_start=0.4,
+                 priority_beta_frames=1e5) -> None:
         super().__init__(state_dim,
                          action_dim,
                          policy_layer_size, 
@@ -993,7 +1007,11 @@ class CategoricalMOMPO(CategoricalMPO):
                          target_update_freq, 
                          device, 
                          k, 
-                         alpha)
+                         alpha,
+                         use_priority,
+                         priority_alpha,
+                         priority_beta_start,
+                         priority_beta_frames)
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature] * k), dtype=torch.float, requires_grad=True, device=device)
@@ -1047,7 +1065,11 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                  target_update_freq=200, 
                  device='cpu', 
                  k=1, 
-                 alpha=0.001) -> None:
+                 alpha=0.001,
+                 use_priority=False,
+                 priority_alpha=0.6,
+                 priority_beta_start=0.4,
+                 priority_beta_frames=1e5) -> None:
         super().__init__(state_dim,
                          action_dim,
                          policy_layer_size, 
@@ -1066,7 +1088,11 @@ class CategoricalScalarizedMPO(CategoricalMPO):
                          target_update_freq, 
                          device, 
                          k, 
-                         alpha)
+                         alpha,
+                         use_priority,
+                         priority_alpha,
+                         priority_beta_start,
+                         priority_beta_frames)
 
         # trainable values
         self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True, device=device)
