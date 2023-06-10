@@ -95,10 +95,6 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
             print(*trans, sep='\n')
             
 
-        # log result in tensorboard
-        for j in range(episode_reward.shape[0]):
-            writer.add_scalar(f'reward_{j}', episode_reward[j], i)
-
         if i % 100 == 0:
             avg_reward = test(agent, args, k)
             for j in range(avg_reward.shape[0]):
@@ -196,10 +192,6 @@ def test(agent: CategoricalMOMPO, args, k):
             if done:
                 break
         rewards.append(episode_reward)
-        # print(f"Episode: {i}, length: {t}, ", end='')
-        # for i in range(episode_reward.shape[0]):
-        #     print(f'reward{i}: {episode_reward[i]:.2f} ', end='')
-        # print()
     avg_reward = np.stack(rewards, axis=-1).mean(axis=-1)
     for i in range(episode_reward.shape[0]):
         print(f'reward{i}: {avg_reward[i]:.2f} ', end='')
