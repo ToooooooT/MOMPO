@@ -31,7 +31,7 @@ class ReplayBuffer:
             self._isfull = True
 
 
-    def sample(self, batch_size):
+    def sample(self, batch_size, device):
         """
         Returns:
             states : expected shape (B, S)
@@ -42,21 +42,21 @@ class ReplayBuffer:
             dones : expected shape (B, 1)
         """
         if self._isfull:
-            sampled_idx = np.random.randint(0, self._size, size=batch_size)
+            sampled_idx = np.random.choice(self._size, size=min(batch_size, self._size))
         else:
-            sampled_idx = np.random.randint(0, self._idx, size=batch_size)
+            sampled_idx = np.random.choice(self._idx, size=min(batch_size, self._size))
 
         samples = [self._storage[idx] for idx in sampled_idx]
 
-        return tuple(torch.tensor(np.array(x), dtype=torch.float) for x in zip(*samples))
+        return *tuple(torch.tensor(np.array(x), dtype=torch.float) for x in zip(*samples)), None, None
 
 
-    def sample_states(self, batch_size):
+    def sample_states(self, batch_size, device):
         '''
         Returns:
             states : expected shape (B, S)
         '''
-        return self.sample(batch_size)[0]
+        return self.sample(batch_size, device)[0]
     
 
 class RetraceBuffer:
@@ -187,7 +187,7 @@ class PrioritizedReplayMemory(object):
         return *encoded_sample, idxes, weights
 
     def sample_states(self, batch_size, device):
-        return self.sample(batch_size, device)[0][0]
+        return self.sample(batch_size, device)[0]
 
 
     def update_priorities(self, idxes, priorities):
