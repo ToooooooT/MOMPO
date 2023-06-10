@@ -110,7 +110,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
     device = args.device
 
     # asyncronous actor
-    agent = BehaviorCategoricalMPO(state_dim, action_dim)
+    agent = BehaviorCategoricalMPO(state_dim, action_dim, device=args.device)
     agent._actor.train()
     print_freq = 100
     episode_reward = np.zeros((k))
