@@ -102,7 +102,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
         if i % 100 == 0:
             avg_reward = test(agent, args, k)
             for j in range(avg_reward.shape[0]):
-                writer.add_scalar(f'test_reward_{j}', avg_reward[j], t)
+                writer.add_scalar(f'test_reward_{j}', avg_reward[j], i)
 
 
 def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
