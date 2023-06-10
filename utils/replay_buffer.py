@@ -41,9 +41,9 @@ class ReplayBuffer:
             dones : expected shape (B, 1)
         """
         if self._isfull:
-            sampled_idx = np.random.randint(0, self._size, size=batch_size)
+            sampled_idx = np.random.choice(self._size, size=min(batch_size, self._size))
         else:
-            sampled_idx = np.random.randint(0, self._idx, size=batch_size)
+            sampled_idx = np.random.choice(self._idx, size=min(batch_size, self._idx))
 
         samples = [self._storage[idx] for idx in sampled_idx]
 

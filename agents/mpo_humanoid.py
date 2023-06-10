@@ -882,7 +882,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             loss: policy loss
             loss_alpha: loss of distribution
         '''
-        alpha = F.softplus(self._alpha) + 1e-8  # avoid zero value
+        alpha = F.softplus(self._alpha) + 1e-8  # ensure a positive and non-zero value
         action_probs = self._actor(states)  # (B, D)
         online_distribution = Categorical(logits=action_probs)
         target_distribution = Categorical(logits=target_action_probs)
@@ -893,22 +893,22 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                                         normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
         loss_policy = torch.sum(loss_policy.mean(dim=1))
 
-        loss_beta = alpha.detach() * \
-                        (self._beta - kl_loss) # (B,)
+        loss_beta = alpha.detach() * (self._beta - kl_loss) # (B,)
         loss_beta = torch.mean(loss_beta)
 
         # policy optimization
         loss = loss_policy + loss_beta
         self._actor_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self._actor.parameters(), .1)  # clipping to prevent the gradients from exploding
         self._actor_optimizer.step()
 
         # update alpha
-        loss_alpha = alpha * \
-                        (self._beta - kl_loss.detach()) # (B,)
+        loss_alpha = alpha * (self._beta - kl_loss.detach()) # (B,)
         loss_alpha = torch.mean(loss_alpha)
         self._alpha_optimizer.zero_grad()
         loss_alpha.backward()
+        nn.utils.clip_grad_norm_([self._alpha], .1)  # clipping to prevent the gradients from exploding
         self._alpha_optimizer.step()
 
         return loss.detach().cpu().item(), loss_alpha.detach().cpu().item(), kl_loss.detach().mean().cpu().item()
@@ -1015,8 +1015,11 @@ class CategoricalMOMPO(CategoricalMPO):
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
+        # logsumexp is more numerically stable than log(sum(exp(q)))
+        # Note that it may explode if q is too large (e.g. q >= 89)
+        # See: https://pytorch.org/docs/stable/generated/torch.logsumexp.html
         loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
-                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0))  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
