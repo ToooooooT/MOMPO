@@ -844,8 +844,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         q_value = torch.stack(q_value, dim=1) # (B, N, K)
 
         # update temperature
-        target_log_probs = target_distribution.log_prob(target_actions.squeeze().T)  # (N, B)
-        loss_temperature, normalized_weights = self.update_temperature(q_value, target_log_probs.T)
+        loss_temperature, normalized_weights = self.update_temperature(q_value)
 
         # update policy
         loss_policy, loss_alpha, kl_loss = self.update_policy(states, target_actions, target_action_probs, normalized_weights)
@@ -1001,25 +1000,23 @@ class CategoricalMOMPO(CategoricalMPO):
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
 
-    def update_temperature(self, q_value: torch.Tensor, target_log_probs):
+    def update_temperature(self, q_value: torch.Tensor):
         '''
         Args:
             q_value: Q-values associated with the actions sampled from the target policy; 
                 expected shape [B, N, K]
-            target_log_probs: a categorical distribution with logits in shape (B, N)
         Returns:
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = q_value / temperatures.view(1, 1, -1)  # (B, N, K)
-        unnormalized_logits = target_log_probs.view(*target_log_probs.size(), 1) + tempered_q_values
 
         # compute normlized importance weights
-        normalized_weights = F.softmax(unnormalized_logits, dim=1)
+        normalized_weights = F.softmax(temperatures, dim=1)
 
         loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
-                 + torch.log(torch.exp(unnormalized_logits).mean(dim=1)).mean(dim=0))  # (K,)
+                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
