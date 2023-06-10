@@ -1013,7 +1013,7 @@ class CategoricalMOMPO(CategoricalMPO):
         tempered_q_values = q_value / temperatures.view(1, 1, -1)  # (B, N, K)
 
         # compute normlized importance weights
-        normalized_weights = F.softmax(temperatures, dim=1)
+        normalized_weights = F.softmax(tempered_q_values, dim=1)
 
         loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
                  + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
