@@ -44,7 +44,7 @@ class ReplayBuffer:
         if self._isfull:
             sampled_idx = np.random.choice(self._size, size=min(batch_size, self._size))
         else:
-            sampled_idx = np.random.choice(self._idx, size=min(batch_size, self._size))
+            sampled_idx = np.random.choice(self._idx, size=min(batch_size, self._idx))
 
         samples = [self._storage[idx] for idx in sampled_idx]
 

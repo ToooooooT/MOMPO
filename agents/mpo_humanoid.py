@@ -897,7 +897,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         kl_loss = kl_divergence(target_distribution, online_distribution)
 
         # average over the batch
-        loss_policy = -online_distribution.log_prob(target_actions.squeeze().transpose(1, 0)) * \
+        loss_policy = -online_distribution.log_prob(target_actions.squeeze(-1).transpose(1, 0)) * \
                                         normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
         loss_policy = torch.sum(loss_policy.mean(dim=1))
 
@@ -937,7 +937,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         with torch.no_grad():
             target_action_probs = self._target_actor(next_states)  # (B, D)
             m = Categorical(logits=target_action_probs)
-            _target_actions = m.sample().squeeze(-1)
+            _target_actions = m.sample()
 
             # one-hot target actions for target critic input
             target_actions = torch.zeros_like(target_action_probs).to(self._device) # (B, D)

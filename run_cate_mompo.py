@@ -3,13 +3,11 @@ from envs.deep_sea_treasure import DeepSeaTreasure
 
 import argparse
 import os
-from collections import namedtuple
 import numpy as np
 import time
 import random
 
 import torch
-import torch.nn as nn
 import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
@@ -23,6 +21,7 @@ def parse_args():
     parse.add_argument('--beta', default=0.001, type=float, help='KL constraint on the change of policy')
     parse.add_argument('--gamma', default=0.999, type=float, help='discount factor')
     parse.add_argument('--epsilons', default='0.075,0.05', type=str, help='epsilon of different objective')
+    parse.add_argument('--tolerance', default=0.7, type=float, help='the reward tolerance for convergence')
     parse.add_argument('--eps', default=1., type=float, help='epsilon for exploration')
     parse.add_argument('--eps_min', default=0.1, type=float, help='minimum of epsilon for exploration')
     parse.add_argument('--eps_decay', default=1e5, type=int, help='minimum of epsilon for exploration')
@@ -94,7 +93,7 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
             trans = list(zip(states[:-1], actions, states[1:]))
             print(*trans, sep='\n')
             
-
+        # log result in tensorboard
         if i % 100 == 0:
             avg_reward = test(agent, args, k)
             for j in range(avg_reward.shape[0]):
@@ -192,11 +191,15 @@ def test(agent: CategoricalMOMPO, args, k):
             if done:
                 break
         rewards.append(episode_reward)
-    avg_reward = np.stack(rewards, axis=-1).mean(axis=-1)
+    rewards = np.stack(rewards, axis=-1)
+    avg_reward = rewards.mean(axis=-1)
+    print("[TEST] ", end='')
     for i in range(episode_reward.shape[0]):
         print(f'reward{i}: {avg_reward[i]:.2f} ', end='')
     print()
-    if avg_reward[0] == 23.7:
+
+    # check if all objective rewards are identical
+    if (rewards == rewards[0]).all() and avg_reward[0] > args.tolerance:
         with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
                     f.write(f'Epsiode: {i}\n')
                     f.write('Converge at: ')
