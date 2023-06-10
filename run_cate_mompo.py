@@ -3,13 +3,11 @@ from envs.deep_sea_treasure import DeepSeaTreasure
 
 import argparse
 import os
-from collections import namedtuple
 import numpy as np
 import time
 import random
 
 import torch
-import torch.nn as nn
 import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
@@ -53,7 +51,6 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
     # total_step = 0
     for i in range(1, int(args.train_iter + 1)):
         agent._actor.train()
-        i += 1
         state = env.reset()
         t = 0
         episode_reward = np.zeros((k))
@@ -97,9 +94,6 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
             
 
         # log result in tensorboard
-        for j in range(episode_reward.shape[0]):
-            writer.add_scalar(f'reward_{j}', episode_reward[j], i)
-
         if i % 100 == 0:
             avg_reward = test(agent, args, k)
             for j in range(avg_reward.shape[0]):
@@ -197,10 +191,6 @@ def test(agent: CategoricalMOMPO, args, k):
             if done:
                 break
         rewards.append(episode_reward)
-        # print(f"Episode: {i}, length: {t}, ", end='')
-        # for i in range(episode_reward.shape[0]):
-        #     print(f'reward{i}: {episode_reward[i]:.2f} ', end='')
-        # print()
     rewards = np.stack(rewards, axis=-1)
     avg_reward = rewards.mean(axis=-1)
     print("[TEST] ", end='')
