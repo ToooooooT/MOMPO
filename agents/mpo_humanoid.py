@@ -466,7 +466,7 @@ class GaussianScalarizedMPO(GaussianMPO):
         self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True, device=device)
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
-        self._weight = torch.tensor(weight).to(device)
+        self._weight = torch.tensor(weight, device=device)
 
 
     def update_temperature(self, q_value: torch.Tensor):
@@ -720,7 +720,7 @@ class BehaviorCategoricalMPO(MPO):
             action_prob = self._actor(state)
         m = Categorical(logits=action_prob)
         if random.random() < epsilon:
-            action = torch.tensor(random.randint(0, self._action_dim - 1))
+            action = torch.tensor(random.randint(0, self._action_dim - 1), device=self._device)
         else:
             action = m.sample()
         return action.unsqueeze(0).detach().cpu().numpy(), m.log_prob(action).unsqueeze(0).detach().cpu().numpy()
@@ -1072,7 +1072,7 @@ class CategoricalScalarizedMPO(CategoricalMPO):
         self._temperatures = torch.tensor(np.array([temperature]), dtype=torch.float, requires_grad=True, device=device)
         self._temperatures_optimizer = optim.Adam([self._temperatures], lr=lr, eps=adam_eps)
 
-        self._weight = torch.tensor(weight).to(device)
+        self._weight = torch.tensor(weight, device=device)
 
 
     def update_temperature(self, q_value: torch.Tensor):
