@@ -35,6 +35,7 @@ def parse_args():
     parse.add_argument('--replay_buffer_size', default=1e6, type=int, help='replay buffer size')
     parse.add_argument('--dual_lr', default=1e-4, type=float, help='dual variable learning rate')
     parse.add_argument('--warmup', default=1e2, type=float, help='number of warmup epochs')
+    parse.add_argument('--use_priority', default=False, action='store_true')
 
     args = parse.parse_args()
 
@@ -234,7 +235,8 @@ def main():
                              alpha=args.alpha,
                              dual_lr=args.dual_lr,
                              replay_buffer_size=int(args.replay_buffer_size),
-                             device=args.device)
+                             device=args.device,
+                             use_priority=args.use_priority)
     agent._actor.share_memory()
 
     if args.model != '':
