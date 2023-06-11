@@ -8,7 +8,7 @@ from torch.distributions.categorical import Categorical
 from torch.distributions import kl_divergence
 
 from models.humanoid import GaussianPolicy, CategoricalPolicy, Critic
-from utils.replay_buffer import ReplayBuffer
+from utils.replay_buffer import ReplayBuffer, RetraceBuffer
 from utils.retrace import GaussianRetrace
 import numpy as np
 import random
@@ -180,7 +180,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         self._beta_mean = beta_mean
         self._beta_std = beta_std
 
-        self._replay_buffer = ReplayBuffer(replay_buffer_size)
+        self._replay_buffer = RetraceBuffer(replay_buffer_size, self._retrace_seq_size)
 
         # copy target netwrok
         self.hard_update(self._target_actor, self._actor)
@@ -317,12 +317,12 @@ class GaussianMPO(BehaviorGaussianMPO):
 
     def update_critic(self):
         states, actions, rewards, log_probs, dones \
-            = self._replay_buffer.sample_trajectories() 
-        states = states.to(self._device) # (T, S)
-        actions = actions.to(self._device) # (T, D)
-        rewards = rewards.to(self._device) # (T, 1)
-        log_probs = log_probs.to(self._device) # (T, D)
-        dones = dones.to(self._device) # (T, 1)
+            = self._replay_buffer.sample_trace(self._batch_size) 
+        states = states.to(self._device) # (B, R, S)
+        actions = actions.to(self._device) # (B, R, D)
+        rewards = rewards.to(self._device) # (B, R, K)
+        log_probs = log_probs.to(self._device) # (B, R, D)
+        dones = dones.to(self._device) # (B, R, 1)
 
         retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma, self._k)
         retrace_target = retrace.objective(states, actions, rewards, log_probs, dones) # (T, K)
