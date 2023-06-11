@@ -413,6 +413,7 @@ class GaussianMOMPO(GaussianMPO):
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
 
@@ -498,6 +499,7 @@ class GaussianScalarizedMPO(GaussianMPO):
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
 
@@ -1034,6 +1036,7 @@ class CategoricalMOMPO(CategoricalMPO):
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
 
@@ -1112,5 +1115,6 @@ class CategoricalScalarizedMPO(CategoricalMPO):
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
