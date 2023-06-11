@@ -324,10 +324,10 @@ class GaussianMPO(BehaviorGaussianMPO):
         log_probs = log_probs.to(self._device) # (B, R, D)
         dones = dones.to(self._device) # (B, R, 1)
 
-        retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma, self._k)
+        retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma, self._k, self._device)
         retrace_target = retrace.objective(states, actions, rewards, log_probs, dones) # (T, K)
 
-        q_values = self._critic(states, actions) # (T, K)
+        q_values = self._critic(states[:, 0, :], actions[:, 0, :]) # (T, K)
         criterion = F.mse_loss
         loss = criterion(q_values, retrace_target).sum(dim=-1)
         self._critic_optimizer.zero_grad()
