@@ -290,6 +290,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         loss = loss_fixed_std + loss_fixed_mean + loss_beta_mean + loss_beta_std
         self._actor_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self._actor.parameters(), 40.)  # clipping to prevent the gradients from exploding
         self._actor_optimizer.step()
 
         # update alpha std
@@ -298,6 +299,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         loss_alpha_std = torch.sum(loss_alpha_std.mean(dim=0))
         self._alpha_std_optimizer.zero_grad()
         loss_alpha_std.backward()
+        nn.utils.clip_grad_norm_([self._alpha_std], 40.)  # clipping to prevent the gradients from exploding
         self._alpha_std_optimizer.step()
 
 
@@ -307,6 +309,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         loss_alpha_mean = torch.sum(loss_alpha_mean.mean(dim=0))
         self._alpha_mean_optimizer.zero_grad()
         loss_alpha_mean.backward()
+        nn.utils.clip_grad_norm_([self._alpha_mean], 40.)  # clipping to prevent the gradients from exploding
         self._alpha_mean_optimizer.step()
 
         return loss.detach().cpu().item(), loss_alpha_mean.detach().cpu().item(), loss_alpha_std.detach().cpu().item()   
@@ -397,16 +400,20 @@ class GaussianMOMPO(GaussianMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = q_value / temperatures.reshape(1, 1, self._k)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
-        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
 
@@ -478,6 +485,7 @@ class GaussianScalarizedMPO(GaussianMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, 1]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
                             / temperatures.reshape(1, 1, 1) # (B, N, 1)
@@ -485,10 +493,13 @@ class GaussianScalarizedMPO(GaussianMPO):
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
 
-        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
 
@@ -882,7 +893,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             loss: policy loss
             loss_alpha: loss of distribution
         '''
-        alpha = F.softplus(self._alpha) + 1e-8  # avoid zero value
+        alpha = F.softplus(self._alpha) + 1e-8  # ensure a positive and non-zero value
         action_probs = self._actor(states)  # (B, D)
         online_distribution = Categorical(logits=action_probs)
         target_distribution = Categorical(logits=target_action_probs)
@@ -893,22 +904,22 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                                         normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
         loss_policy = torch.sum(loss_policy.mean(dim=1))
 
-        loss_beta = alpha.detach() * \
-                        (self._beta - kl_loss) # (B,)
+        loss_beta = alpha.detach() * (self._beta - kl_loss) # (B,)
         loss_beta = torch.mean(loss_beta)
 
         # policy optimization
         loss = loss_policy + loss_beta
         self._actor_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self._actor.parameters(), 40.)  # clipping to prevent the gradients from exploding
         self._actor_optimizer.step()
 
         # update alpha
-        loss_alpha = alpha * \
-                        (self._beta - kl_loss.detach()) # (B,)
+        loss_alpha = alpha * (self._beta - kl_loss.detach()) # (B,)
         loss_alpha = torch.mean(loss_alpha)
         self._alpha_optimizer.zero_grad()
         loss_alpha.backward()
+        nn.utils.clip_grad_norm_([self._alpha], 40.)  # clipping to prevent the gradients from exploding
         self._alpha_optimizer.step()
 
         return loss.detach().cpu().item(), loss_alpha.detach().cpu().item(), kl_loss.detach().mean().cpu().item()
@@ -1009,17 +1020,23 @@ class CategoricalMOMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = q_value / temperatures.view(1, 1, -1)  # (B, N, K)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        # logsumexp is more numerically stable than log(sum(exp(q)))
+        # Note that it may explode if q is too large (e.g. q >= 89)
+        # See: https://pytorch.org/docs/stable/generated/torch.logsumexp.html
         loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
-                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
 
@@ -1084,6 +1101,7 @@ class CategoricalScalarizedMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, 1]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
                             / temperatures.reshape(1, 1, 1) # (B, N, 1)
@@ -1091,9 +1109,12 @@ class CategoricalScalarizedMPO(CategoricalMPO):
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
 
-        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_([self._temperatures], 40.)  # clipping to prevent the gradients from exploding
         self._temperatures_optimizer.step()
         return loss.detach().cpu().item(), normalized_weights.detach()
