@@ -1,8 +1,8 @@
 import os
 
-eps_time = .05
-ratio_set = [0.5, 1.0, 1.1, 1.2, 1.3,  1.4,  1.5]
-tolerance = [0.7, 0.7, 8.2, 8.2, 11.5, 15.1, 23.7]
+eps_time = .01
+ratio_set = list(reversed([1.3,  1.4,  1.5]))
+tolerance = list(reversed([11.5, 14.0, 22.4]))
 alpha = .01
 
 for ratio, tol in zip(ratio_set, tolerance):
