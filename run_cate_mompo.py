@@ -201,10 +201,10 @@ def test(agent: CategoricalMOMPO, args, k):
     # check if all objective rewards are identical
     if (rewards == rewards[0]).all() and avg_reward[0] >= args.tolerance:
         with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
-                    f.write(f'Epsiode: {i}\n')
-                    f.write('Converge at: ')
-                    for j in range(episode_reward.shape[0]):
-                        f.write(f'reward{j}: {episode_reward[j]:.2f} ')
+            f.write(f'Epsiode: {i}\n')
+            f.write('Converge at: ')
+            for j in range(episode_reward.shape[0]):
+                f.write(f'reward{j}: {episode_reward[j]:.2f} ')
     agent.save(args.logdir)
     return avg_reward
 
