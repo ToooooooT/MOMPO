@@ -229,7 +229,8 @@ def main():
 
     args.epsilons = np.array([float(x) for x in args.epsilons.split(',')])
 
-    agent = CategoricalMOMPO(state_dim, action_dim,
+    agent = CategoricalMOMPO(state_dim, 
+                             action_dim,
                              gamma=args.gamma, 
                              epsilon=args.epsilons, 
                              beta=args.beta, 
