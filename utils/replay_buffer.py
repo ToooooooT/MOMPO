@@ -63,10 +63,11 @@ class ReplayBuffer:
 class RetraceBuffer:
     """A replay buffer for retrace.
     """
-    def __init__(self, buffer_size: int):
+    def __init__(self, buffer_size: int, ret_seq_size=8):
         self._size = buffer_size
         self._storage: List[Tuple] = [None] * buffer_size
         self._idx = 0
+        self._ret_seq_size = ret_seq_size
         self._isfull = False
 
     def push(self, trajectory: List[Tuple]):
@@ -81,8 +82,15 @@ class RetraceBuffer:
             if not self._isfull and self._idx == self._size - 1:
                 self._isfull = True
 
+    def sample_idx(self, batch_size: int, ret_seq_size=0):
+        if self._isfull:
+            sampled_idx = np.random.choice(self._size - ret_seq_size, size=min(batch_size, self._size))
+        else:
+            sampled_idx = np.random.choice(self._idx - ret_seq_size, size=min(batch_size, self._idx))
+        return sampled_idx
+
     def sample_batch(self, batch_size: int):
-        """
+        '''
         Returns:
             states : expected shape (B, S)
             actions : expected shape (B, 1)
@@ -90,51 +98,39 @@ class RetraceBuffer:
             next_states : expected shape (B, S)
             log_probs : expected shape (B, 1)
             dones : expected shape (B, 1)
-        """
-        if self._isfull:
-            sampled_idx = np.random.choice(self._size, size=min(batch_size, self._size))
-        else:
-            sampled_idx = np.random.choice(self._idx, size=min(batch_size, self._idx))
+        '''
+        sampled_idx = self.sample_idx(batch_size)
 
         samples = [self._storage[idx] for idx in sampled_idx]
 
         return tuple(torch.tensor(np.array(x), dtype=torch.float) for x in zip(*samples))
 
-    def sample_trace(self):
-        """Sample a trace until the terminal state.
-
+    def sample_states(self, batch_size):
+        '''
         Returns:
-            states : expected shape (T, S)
-            actions : expected shape (T, D)/(T,)
-            rewards : expected shape (T, K)
-            next_states : expected shape (T, S)
-            log_probs : expected shape (T,)
-            dones : expected shape (T,)
-        """
-        def collect_trace(start, end):
-            trace = []
-            completed = False
-            for i in range(start, end):
-                trans = self._storage[i]
-                done = trans[-1]
-                trace.append(trans)
-                if done:
-                    completed = True
-                    break
+            states : expected shape (B, S)
+        '''
+        return self.sample_batch(batch_size)[0]
 
-            return trace, completed
-        
+    def sample_trace(self, batch_size):
+        '''
+        Returns:
+            R: retrace sequence size
+            states : expected shape (B, R, S)
+            actions : expected shape (B, R, D)/(B, R, 1)
+            rewards : expected shape (B, R, K)
+            next_states : expected shape (B, R, S)
+            log_probs : expected shape (B, R, D)
+            dones : expected shape (B, R, 1)
+        '''
+        sampled_idx = self.sample_idx(batch_size, self._ret_seq_size)
 
-        if self._isfull:
-            N = self._size
-            t = np.random.choice(N)
-            trace, completed = collect_trace(t, N)
+        samples = []
+        for idx in sampled_idx:
+            transitions = []
+            for i in range(self._ret_seq_size):
+                transitions.append(self._storage[idx + i])
+            transitions = tuple(np.array(x) for x in zip(*transitions))
+            samples.append(transitions)
 
-            if not completed:
-                trace += collect_trace(0, self._idx)  # collect from start
-        else:
-            N = self._idx
-            t = np.random.choice(N)
-            trace, _ = collect_trace(t, N)
-
-        return tuple(torch.tensor(np.array(x), dtype=torch.float) for x in zip(*trace))
+        return tuple(torch.tensor(np.array(x), dtype=torch.float) for x in zip(*samples))
