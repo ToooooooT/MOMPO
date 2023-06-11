@@ -17,7 +17,7 @@ def parse_args():
     parse.add_argument('--logdir', default='./logs', type=str, help='base directory to save log')
     parse.add_argument('--model', default='', type=str, help='pretrained model path')
     parse.add_argument('--env', default='DeepSeaTreasure', type=str, help='environment name')
-    parse.add_argument('--alpha', default=1., type=float, help='the Lagrangian multiplier for the policy update constraint')
+    parse.add_argument('--alpha', default=0.01, type=float, help='the Lagrangian multiplier for the policy update constraint')
     parse.add_argument('--beta', default=0.001, type=float, help='KL constraint on the change of policy')
     parse.add_argument('--gamma', default=0.999, type=float, help='discount factor')
     parse.add_argument('--epsilons', default='0.075,0.05', type=str, help='epsilon of different objective')
