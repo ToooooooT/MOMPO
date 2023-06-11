@@ -299,6 +299,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         loss_alpha_std = torch.sum(loss_alpha_std.mean(dim=0))
         self._alpha_std_optimizer.zero_grad()
         loss_alpha_std.backward()
+        nn.utils.clip_grad_norm_([self._alpha_std], 40.)  # clipping to prevent the gradients from exploding
         self._alpha_std_optimizer.step()
 
 
@@ -308,7 +309,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         loss_alpha_mean = torch.sum(loss_alpha_mean.mean(dim=0))
         self._alpha_mean_optimizer.zero_grad()
         loss_alpha_mean.backward()
-        nn.utils.clip_grad_norm_([self._alpha], 40.)  # clipping to prevent the gradients from exploding
+        nn.utils.clip_grad_norm_([self._alpha_mean], 40.)  # clipping to prevent the gradients from exploding
         self._alpha_mean_optimizer.step()
 
         return loss.detach().cpu().item(), loss_alpha_mean.detach().cpu().item(), loss_alpha_std.detach().cpu().item()   
