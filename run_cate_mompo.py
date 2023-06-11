@@ -205,7 +205,7 @@ def test(agent: CategoricalMOMPO, args, k):
                     f.write('Converge at: ')
                     for j in range(episode_reward.shape[0]):
                         f.write(f'reward{j}: {episode_reward[j]:.2f} ')
-        agent.save(args.logdir)
+    agent.save(args.logdir)
     return avg_reward
 
 def main():
