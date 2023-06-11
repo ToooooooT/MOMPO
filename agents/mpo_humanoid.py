@@ -888,7 +888,7 @@ class CategoricalMPO(BehaviorCategoricalMPO):
             loss: policy loss
             loss_alpha: loss of distribution
         '''
-        alpha = F.softplus(self._alpha) + 1e-8  # avoid zero value
+        alpha = F.softplus(self._alpha) + 1e-8  # ensure a positive and non-zero value
         action_probs = self._actor(states)  # (B, D)
         online_distribution = Categorical(logits=action_probs)
         target_distribution = Categorical(logits=target_action_probs)
