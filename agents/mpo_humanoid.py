@@ -397,13 +397,16 @@ class GaussianMOMPO(GaussianMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = q_value / temperatures.reshape(1, 1, self._k)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
-        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
@@ -478,6 +481,7 @@ class GaussianScalarizedMPO(GaussianMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, 1]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
                             / temperatures.reshape(1, 1, 1) # (B, N, 1)
@@ -485,7 +489,9 @@ class GaussianScalarizedMPO(GaussianMPO):
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
 
-        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
@@ -1009,14 +1015,19 @@ class CategoricalMOMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, K]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = q_value / temperatures.view(1, 1, -1)  # (B, N, K)
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
 
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        # logsumexp is more numerically stable than log(sum(exp(q)))
+        # Note that it may explode if q is too large (e.g. q >= 89)
+        # See: https://pytorch.org/docs/stable/generated/torch.logsumexp.html
         loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
-                 + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))  # (K,)
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
@@ -1084,6 +1095,7 @@ class CategoricalScalarizedMPO(CategoricalMPO):
             loss: scalar value loss
             normalized_weights: used for policy optimization; expected shape [B, N, 1]
         '''
+        B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
         tempered_q_values = (self._weight.reshape(1, 1, self._k) * q_value).sum(dim=-1, keepdim=True) \
                             / temperatures.reshape(1, 1, 1) # (B, N, 1)
@@ -1091,7 +1103,9 @@ class CategoricalScalarizedMPO(CategoricalMPO):
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1) # (B, N, 1)
 
-        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) + torch.log(torch.exp(tempered_q_values).mean(dim=1)).mean(dim=0))
+        log_num_actions = torch.log(torch.tensor(N, dtype=torch.float))
+        loss = temperatures * (torch.tensor(self._epsilons, device=self._device) \
+                 + torch.logsumexp(tempered_q_values, dim=1).mean(dim=0) - log_num_actions)  # (K,)
         loss = torch.sum(loss)
         self._temperatures_optimizer.zero_grad()
         loss.backward()
