@@ -19,12 +19,14 @@ class ReplayBuffer:
         self._idx = 0
         self._isfull = False
 
-    def push(self, state, action, reward, next_state, log_prob, done):
+    def push(self, *transition):
         """
         Args:
             transition: (s(t), a(t), r(t), s(t+1), log(pi(a|s)), done)
         """
-        self._storage[self._idx] = (state, action, reward, next_state, log_prob, done)
+        assert len(transition) == 6
+
+        self._storage[self._idx] = transition
         self._idx = (self._idx + 1) % self._size
         if not self._isfull and self._idx == self._size - 1:
             self._isfull = True
