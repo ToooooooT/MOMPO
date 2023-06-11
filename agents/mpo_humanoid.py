@@ -899,22 +899,22 @@ class CategoricalMPO(BehaviorCategoricalMPO):
                                         normalized_weights.sum(dim=-1).transpose(1, 0) # (N, B)
         loss_policy = torch.sum(loss_policy.mean(dim=1))
 
-        loss_beta = alpha.detach() * \
-                        (self._beta - kl_loss) # (B,)
+        loss_beta = alpha.detach() * (self._beta - kl_loss) # (B,)
         loss_beta = torch.mean(loss_beta)
 
         # policy optimization
         loss = loss_policy + loss_beta
         self._actor_optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self._actor.parameters(), 40.)  # clipping to prevent the gradients from exploding
         self._actor_optimizer.step()
 
         # update alpha
-        loss_alpha = alpha * \
-                        (self._beta - kl_loss.detach()) # (B,)
+        loss_alpha = alpha * (self._beta - kl_loss.detach()) # (B,)
         loss_alpha = torch.mean(loss_alpha)
         self._alpha_optimizer.zero_grad()
         loss_alpha.backward()
+        nn.utils.clip_grad_norm_([self._alpha], 40.)  # clipping to prevent the gradients from exploding
         self._alpha_optimizer.step()
 
         return loss.detach().cpu().item(), loss_alpha.detach().cpu().item(), kl_loss.detach().mean().cpu().item()
