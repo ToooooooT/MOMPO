@@ -1,4 +1,4 @@
-from agents.mpo_humanoid import GaussianMOMPOHumanoid, BehaviorGaussianMPO
+from agents import GaussianMOMPOHumanoid, BehaviorGaussianMPO
 from dm_control import viewer
 from envs.humanoid.MO_humannoid import MOHumanoid_run
 

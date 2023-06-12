@@ -1,4 +1,4 @@
-from agents.mpo_humanoid import CategoricalMOMPO, BehaviorCategoricalMPO
+from agents import CategoricalMOMPO, BehaviorCategoricalMPO
 from envs.deep_sea_treasure import DeepSeaTreasure
 
 import argparse
