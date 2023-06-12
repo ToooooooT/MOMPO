@@ -7,6 +7,8 @@ import numpy as np
 import time
 import random
 
+from sklearn.metrics import mean_absolute_error
+
 import torch
 import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
@@ -41,7 +43,18 @@ def parse_args():
 
 
 action_repr = ['U', 'D', 'L', 'R']
-
+pareto_front_map = {
+    0.7 : -1,
+    8.2 : -3,
+    11.5: -5,
+    14.0: -7,
+    15.1: -8,
+    16.1: -9,
+    19.6: -13,
+    20.3: -14,
+    22.4: -17,
+    23.7: -19,
+}
 
 def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
     env = args.env
@@ -95,7 +108,8 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
 
         # log result in tensorboard
         if i % 100 == 0:
-            avg_reward = test(agent, args, k)
+            avg_reward, pareto_front_err = test(agent, args, k)
+            writer.add_scalar("pareto-front error", pareto_front_err, i)
             for j in range(avg_reward.shape[0]):
                 writer.add_scalar(f'test_reward_{j}', avg_reward[j], i)
 
@@ -164,7 +178,8 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
                 all_ps_finish = False
                 break
         if t % 100 == 0:
-            avg_reward = test(agent, args, k)
+            avg_reward, pareto_front_err = test(agent, args, k)
+            writer.add_scalar("pareto-front error", pareto_front_err, t)
             for j in range(avg_reward.shape[0]):
                 writer.add_scalar(f'test_reward_{j}', avg_reward[j], t)
         for _ in range(args.multiprocess):
@@ -191,12 +206,23 @@ def test(agent: CategoricalMOMPO, args, k):
             if done:
                 break
         rewards.append(episode_reward)
+
+    # check if pareto-front policy
+    rewards0, rewards1 = np.array(list(zip(*rewards)))
+    pareto_front = np.array(list(map(pareto_front_map.get, rewards0)))
+
+    pareto_front_err = mean_absolute_error(pareto_front, rewards1)
+    is_pareto_front = (rewards1 == pareto_front).all()
+
     rewards = np.stack(rewards, axis=-1)
     avg_reward = rewards.mean(axis=-1)
+
     print("[TEST] ", end='')
     for i in range(episode_reward.shape[0]):
         print(f'reward{i}: {avg_reward[i]:.2f} ', end='')
-    print()
+
+    if is_pareto_front:
+        print("(Pareto front)")
 
     # check if all objective rewards are identical
     if (rewards == rewards[0]).all() and avg_reward[0] >= args.tolerance:
@@ -206,7 +232,7 @@ def test(agent: CategoricalMOMPO, args, k):
             for j in range(episode_reward.shape[0]):
                 f.write(f'reward{j}: {episode_reward[j]:.2f} ')
     agent.save(args.logdir)
-    return avg_reward
+    return avg_reward, pareto_front_err
 
 def main():
     torch.multiprocessing.set_start_method('spawn')
@@ -245,7 +271,7 @@ def main():
         agent.load(args.model)
 
     if args.test_only:
-        test(agent, args, k)
+        avg_reward, pareto_front_err = test(agent, args, k)
     elif args.multiprocess > 1:
         replay_buffer_q = mp.Queue()
         actor_q = mp.Queue()
