@@ -95,8 +95,9 @@ class BehaviorGaussianMPO(MPO):
         
         m = Normal(mean, std)
         action = m.sample()
-        action = torch.clamp(action, min=-torch.ones_like(action).to(self._device).to(torch.float),
-                             max=torch.ones_like(action).to(self._device).to(torch.float))
+        # don't clip the action
+        # action = torch.clamp(action, min=-torch.ones_like(action).to(self._device).to(torch.float),
+        #                      max=torch.ones_like(action).to(self._device).to(torch.float))
         return action.detach().cpu().numpy(), m.log_prob(action).detach().cpu().numpy()
 
 
