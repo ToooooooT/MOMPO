@@ -98,7 +98,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
     agent = BehaviorGaussianMPO(state_dim, action_dim)
     agent._actor.train()
     print_freq = 100
-    episode_reward = np.zeros((k))
+    episode_reward = np.zeros((2,))
 
     for i in range(1, int(args.train_iter) + 1): 
         replay_buffer = []
@@ -109,7 +109,9 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         while True:
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
+            energy_penalty = np.array([-np.linalg.norm(action)])
             trajectory.append((state, [action], reward, [log_prob], [int(done)]))
+            episode_reward += np.concatenate([reward, energy_penalty])
             state = next_state
             episode_reward += reward
             t += 1
@@ -176,11 +178,11 @@ def test(agent: GaussianMOMPOHumanoid, args, k):
 
     for i in range(args.test_iter):
         state = env.reset()
-        episode_reward = np.zeros((k))
+        episode_reward = np.zeros((2,))
         t = 0
         while True:
             action, _ = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
-            next_state, reward, done = env.step(action[0])
+            next_state, reward, done = env.step(action)
             energy_penalty = np.array([-np.linalg.norm(action)])
             state = next_state
             episode_reward += np.concatenate([reward, energy_penalty])
