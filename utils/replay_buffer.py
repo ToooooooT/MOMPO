@@ -113,9 +113,9 @@ class RetraceBuffer:
         return self.sample_batch(batch_size)[0]
 
     def sample_trace(self, batch_size):
-        '''
+        '''"R" denotes the retrace sequence size
+
         Returns:
-            R: retrace sequence size
             states : expected shape (B, R, S)
             actions : expected shape (B, R, D)/(B, R, 1)
             rewards : expected shape (B, R, K)

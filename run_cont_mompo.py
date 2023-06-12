@@ -60,7 +60,7 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
             energy_penalty = np.array([-np.linalg.norm(action)])
-            trajectory.append((state, action, reward, log_prob, [int(done)]))
+            trajectory.append((state, action, reward, next_state, log_prob, [int(done)]))
             state = next_state
             episode_reward += np.concatenate([reward, energy_penalty])
             t += 1
@@ -111,7 +111,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
             energy_penalty = np.array([-np.linalg.norm(action)])
-            trajectory.append((state, [action], reward, [log_prob], [int(done)]))
+            trajectory.append((state, [action], reward, next_state, [log_prob], [int(done)]))
             episode_reward += np.concatenate([reward, energy_penalty])
             state = next_state
             episode_reward += reward
