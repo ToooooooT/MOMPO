@@ -7,6 +7,7 @@ import os
 import numpy as np
 import time
 import random
+from threading import Thread
 
 import torch
 import torch.multiprocessing as mp
@@ -98,7 +99,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
     agent = BehaviorGaussianMPO(state_dim, action_dim)
     agent._actor.train()
     print_freq = 100
-    episode_reward = np.zeros((k))
+    episode_reward = np.zeros((2,))
 
     for i in range(1, int(args.train_iter) + 1): 
         replay_buffer = []
@@ -109,7 +110,9 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         while True:
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
+            energy_penalty = np.array([-np.linalg.norm(action)])
             trajectory.append((state, [action], reward, [log_prob], [int(done)]))
+            episode_reward += np.concatenate([reward, energy_penalty])
             state = next_state
             episode_reward += reward
             t += 1
@@ -133,13 +136,26 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         except:
             pass
 
-        # replay_buffer.push(trajectory)
+
+def recieve_transition(agent: GaussianMOMPOHumanoid, replay_buffer_q):
+    while True:
+        while not replay_buffer_q.empty():
+            transitions = replay_buffer_q.get()
+            agent._replay_buffer.push(transitions)
+
 
 
 def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k):
     writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
+    # use threads to recieve transition from actor
+    threads = [
+        Thread(target=recieve_transition, kwargs={'agent': agent, 'replay_buffer_q': replay_buffer_q})
+    ]
+    for thread in threads:
+        thread.start()
+
     while not all_ps_finish:
         agent._actor.train()
         t += 1
@@ -147,7 +163,7 @@ def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k)
             transitions = replay_buffer_q.get()
             agent._replay_buffer.push(transitions)
         # wait for replay buffer has element; TODO write it in other way
-        while not agent._replay_buffer._isfull or agent._replay_buffer._idx == 0:
+        while (not agent._replay_buffer._isfull) and agent._replay_buffer._idx == 0:
             pass
         loss = agent.update(t)
         writer.add_scalar('alpha_mean', agent._alpha_mean, t)
@@ -176,11 +192,11 @@ def test(agent: GaussianMOMPOHumanoid, args, k):
 
     for i in range(args.test_iter):
         state = env.reset()
-        episode_reward = np.zeros((k))
+        episode_reward = np.zeros((2,))
         t = 0
         while True:
             action, _ = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
-            next_state, reward, done = env.step(action[0])
+            next_state, reward, done = env.step(action)
             energy_penalty = np.array([-np.linalg.norm(action)])
             state = next_state
             episode_reward += np.concatenate([reward, energy_penalty])
