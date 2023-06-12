@@ -110,7 +110,6 @@ def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_
     episode_reward = np.zeros((2,))
 
     for i in range(1, int(args.train_iter) + 1): 
-        replay_buffer = []
         state = env.reset()
         t = 0
         episode_reward = np.zeros((2,))
@@ -135,7 +134,7 @@ def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_
                 print(f'reward{i}: {episode_reward[i]} ', end='')
             print()
 
-        replay_buffer_q.put_nowait(replay_buffer)
+        replay_buffer_q.put_nowait(trajectory)
         try:
             actor = actor_q.get_nowait()
             if actor:
