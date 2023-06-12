@@ -1,5 +1,5 @@
 from agents import CategoricalMOMPO, BehaviorCategoricalMPO
-from envs.deep_sea_treasure import DeepSeaTreasure
+from envs.deep_sea_treasure.deep_sea_treasure import DeepSeaTreasure
 
 import argparse
 import os
