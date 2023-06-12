@@ -28,6 +28,7 @@ class GaussianRetrace(Retrace):
                   states: torch.Tensor, 
                   actions: torch.Tensor, 
                   rewards: torch.Tensor, 
+                  next_states: torch.Tensor,
                   behavior_log_probs: torch.Tensor,
                   dones: torch.Tensor):
         '''
@@ -40,15 +41,22 @@ class GaussianRetrace(Retrace):
         Returns:
             target_q_value: expected shape (B, K)
         '''
+        # help us build the target distribution
+        def action_distribution(_states):
+            with torch.no_grad():
+                means, stds = [], []
+                for i in range(self._retrace_seq_size):
+                    mean, std = self._actor(_states[:, i, :]) # (B, D)
+                    means.append(mean)
+                    stds.append(std)
+                mean = torch.stack(means, dim=1) #(B, R, D)
+                std = torch.stack(stds, dim=1) #(B, R, D)
+                
+            return Normal(mean, std)
+
+
         with torch.no_grad():
-            means, stds = [], []
-            for i in range(self._retrace_seq_size):
-                mean, std = self._actor(states[:, i, :]) # (B, D)
-                means.append(mean)
-                stds.append(std)
-            mean = torch.stack(means, dim=1) #(B, R, D)
-            std = torch.stack(stds, dim=1) #(B, R, D)
-            target_distribution = Normal(mean, std)
+            target_distribution = action_distribution(states)
 
             importance_weights = torch.exp(torch.sum(target_distribution.log_prob(actions) - behavior_log_probs, dim=-1, keepdim=True))
             importance_weights = torch.stack([importance_weights, torch.ones_like(importance_weights).to(torch.float)], dim=-1).min(dim=-1)[0] # (B, R, 1)
@@ -56,13 +64,14 @@ class GaussianRetrace(Retrace):
             importance_weights[:, 0, :] = 1.
             importance_weights_cumprod = importance_weights.cumprod(dim=1)
 
-            # Monte-Carlo method to estimate the continuous expectation
-            target_values = torch.zeros((*states.shape[:2], self._k), dtype=torch.float, device=self._device) # (B, R, K)
+            # Monte-Carlo method to estimate the target values of the next states V(s_{j+1})
+            target_values = torch.zeros((*next_states.shape[:2], self._k), dtype=torch.float, device=self._device) # (B, R, K)
+            next_target_distribution = action_distribution(next_states)
             sample_num = 1000
-            actions_mc = target_distribution.sample(sample_shape=(sample_num,)) # (sample_num, B, R, D)
+            actions_mc = next_target_distribution.sample(sample_shape=(sample_num,)) # (sample_num, B, R, D)
             for actions_est in actions_mc:
                 for i in range(self._retrace_seq_size):
-                    Q_est = self._critic(states[:, i, :], actions_est[:, i, :]) # (B, K)
+                    Q_est = self._critic(next_states[:, i, :], actions_est[:, i, :]) # (B, K)
                     target_values[:, i, :] += Q_est
             target_values /= sample_num
 
@@ -78,14 +87,14 @@ class GaussianRetrace(Retrace):
             mask_current_dones = torch.roll(dones, 1)
             mask_current_dones[:, 0, :] = 0.
             mask_current_dones = (mask_current_dones.cumsum(dim=1) > 0).type(torch.float)
-            delta = rewards * mask_current_dones + self._gamma * target_values * (1 - mask_target_dones) \
-                - target_q_values * mask_current_dones # (B, R, K)
+            delta = rewards * (1 - mask_current_dones) + self._gamma * target_values * (1 - mask_target_dones) \
+                - target_q_values * (1 - mask_current_dones) # (B, R, K)
 
             # (1, g, g^2, ...)
             powers = torch.arange(self._retrace_seq_size, device=self._device)
             gammas = (self._gamma ** powers).view(1, -1, 1) # (1, R, 1)
 
-            ret_q_values = target_q_values[:, 0, :] + (gammas * importance_weights_cumprod[i] * delta[i]).sum(dim=1)
+            ret_q_values = target_q_values[:, 0, :] + (gammas * importance_weights_cumprod * delta).sum(dim=1)
 
         return ret_q_values
 

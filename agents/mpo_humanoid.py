@@ -281,16 +281,17 @@ class GaussianMPO(BehaviorGaussianMPO):
 
 
     def update_critic(self):
-        states, actions, rewards, log_probs, dones \
+        states, actions, rewards, next_states, log_probs, dones \
             = self._replay_buffer.sample_trace(self._batch_size) 
         states = states.to(self._device) # (B, R, S)
         actions = actions.to(self._device) # (B, R, D)
         rewards = rewards.to(self._device) # (B, R, K)
+        next_states = next_states.to(self._device) # (B, R, S)
         log_probs = log_probs.to(self._device) # (B, R, D)
         dones = dones.to(self._device) # (B, R, 1)
 
         retrace = GaussianRetrace(self._retrace_seq_size, self._target_critic, self._target_actor, self._gamma, self._k, self._device)
-        retrace_target = retrace.objective(states, actions, rewards, log_probs, dones) # (T, K)
+        retrace_target = retrace.objective(states, actions, rewards, next_states, log_probs, dones) # (T, K)
 
         q_values = self._critic(states[:, 0, :], actions[:, 0, :]) # (T, K)
         criterion = F.mse_loss
