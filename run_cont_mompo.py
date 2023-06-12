@@ -7,6 +7,7 @@ import os
 import numpy as np
 import time
 import random
+from threading import Thread
 
 import torch
 import torch.multiprocessing as mp
@@ -135,13 +136,26 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         except:
             pass
 
-        # replay_buffer.push(trajectory)
+
+def recieve_transition(agent: GaussianMOMPOHumanoid, replay_buffer_q):
+    while True:
+        while not replay_buffer_q.empty():
+            transitions = replay_buffer_q.get()
+            agent._replay_buffer.push(transitions)
+
 
 
 def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k):
     writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
+    # use threads to recieve transition from actor
+    threads = [
+        Thread(target=recieve_transition, kwargs={'agent': agent, 'replay_buffer_q': replay_buffer_q})
+    ]
+    for thread in threads:
+        thread.start()
+
     while not all_ps_finish:
         agent._actor.train()
         t += 1
@@ -149,7 +163,7 @@ def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k)
             transitions = replay_buffer_q.get()
             agent._replay_buffer.push(transitions)
         # wait for replay buffer has element; TODO write it in other way
-        while not agent._replay_buffer._isfull or agent._replay_buffer._idx == 0:
+        while (not agent._replay_buffer._isfull) and agent._replay_buffer._idx == 0:
             pass
         loss = agent.update(t)
         writer.add_scalar('alpha_mean', agent._alpha_mean, t)

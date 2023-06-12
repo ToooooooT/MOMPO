@@ -4,8 +4,8 @@ from envs.deep_sea_treasure import DeepSeaTreasure
 import argparse
 import os
 import numpy as np
-import time
 import random
+from threading import Thread
 
 from sklearn.metrics import mean_absolute_error
 
@@ -156,20 +156,30 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         except:
             pass
 
+def recieve_transition(agent: CategoricalMOMPO, replay_buffer_q):
+    while True:
+        while not replay_buffer_q.empty():
+            transitions = replay_buffer_q.get()
+            for transition in transitions:
+                agent._replay_buffer.push(*transition)
+
 
 def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
     writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
+    # use threads to recieve transition from actor
+    threads = [
+        Thread(target=recieve_transition, kwargs={'agent': agent, 'replay_buffer_q': replay_buffer_q})
+    ]
+    for thread in threads:
+        thread.start()
+
     while not all_ps_finish:
         agent._actor.train()
         t += 1
-        while not replay_buffer_q.empty():
-            transitions = replay_buffer_q.get()
-            for transition in transitions:
-                agent._replay_buffer.push(*transition)
         # wait for replay buffer has element; TODO write it in other way
-        while not agent._replay_buffer._isfull or agent._replay_buffer._idx == 0:
+        while (not agent._replay_buffer._isfull) and agent._replay_buffer._idx == 0:
             pass
         loss = agent.update(t)
         writer.add_scalar('alpha', agent._alpha, t)
