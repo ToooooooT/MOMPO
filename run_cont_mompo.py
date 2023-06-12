@@ -106,7 +106,7 @@ def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_
                                 device=args.device)
 
     agent._actor.train()
-    print_freq = 100
+    print_freq = 1
     episode_reward = np.zeros((2,))
 
     for i in range(1, int(args.train_iter) + 1): 
