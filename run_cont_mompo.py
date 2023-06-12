@@ -91,12 +91,20 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
                 writer.add_scalar(f'test_reward_{j}', avg_reward[j], i)
 
 
-def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
+def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_q, actor_q):
     env = args.env
     device = args.device
 
     # asyncronous actor
-    agent = BehaviorGaussianMPO(state_dim, action_dim)
+    agent = BehaviorGaussianMPO(state_dim, 
+                                action_dim, 
+                                policy_layer_size=policy_layer_size,
+                                tanh_on_action_mean=args.tanh_on_action_mean,
+                                min_std=args.min_std,
+                                epsilon=args.epsilons, 
+                                k=k,
+                                device=args.device)
+
     agent._actor.train()
     print_freq = 100
     episode_reward = np.zeros((2,))
@@ -105,7 +113,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         replay_buffer = []
         state = env.reset()
         t = 0
-        episode_reward = np.zeros((k))
+        episode_reward = np.zeros((2,))
         trajectory = []
         while True:
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
@@ -282,7 +290,7 @@ def main():
         actor_q = mp.Queue()
         ps = []
         for i in range(args.multiprocess):
-            ps.append(mp.Process(target=MultiTrain, args=(args, k, state_dim, action_dim, replay_buffer_q, actor_q)))
+            ps.append(mp.Process(target=MultiTrain, args=(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_q, actor_q)))
         for p in ps:
             p.start()
         Learner(agent, ps, actor_q, replay_buffer_q, args, k)
