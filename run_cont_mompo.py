@@ -1,16 +1,15 @@
-from agents.mpo_humanoid import GaussianMOMPOHumanoid, BehaviorGaussianMPO
+from agents import GaussianMOMPOHumanoid, BehaviorGaussianMPO
 from dm_control import viewer
 from envs.humanoid.MO_humannoid import MOHumanoid_run
 
 import argparse
 import os
-from collections import namedtuple
 import numpy as np
 import time
 import random
+from threading import Thread
 
 import torch
-import torch.nn as nn
 import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
 
@@ -28,15 +27,17 @@ def parse_args():
     parse.add_argument('--lr', default=2e-4, type=float, help='learning rate')
     parse.add_argument('--adam_eps', default=1e-8, type=float, help='epsilon of Adam optimizer')
     parse.add_argument('--epsilons', default='0.1,0.000001', type=str, help='epsilon of different objective')
-    parse.add_argument('--eps', default=1., type=float, help='epsilon for exploration')
-    parse.add_argument('--eps_min', default=0.1, type=int, help='minimum of epsilon for exploration')
-    parse.add_argument('--eps_decay', default=10000, type=int, help='minimum of epsilon for exploration')
+    parse.add_argument('--eps', default=0., type=float, help='epsilon for exploration')
+    parse.add_argument('--eps_min', default=0., type=int, help='minimum of epsilon for exploration')
+    parse.add_argument('--eps_decay', default=1e5, type=int, help='minimum of epsilon for exploration')
     parse.add_argument('--test_only', default=False, action='store_true')
-    parse.add_argument('--train_iter', default=30000, type=int, help='training iterations')
+    parse.add_argument('--train_iter', default=1e7, type=int, help='training iterations')
     parse.add_argument('--test_iter', default=10, type=int, help='testing iterations')
     parse.add_argument('--device', default='cpu', type=str, help='device')
-    parse.add_argument('--seed', default=10, type=int, help='random seed')
+    parse.add_argument('--seed', default=1, type=int, help='random seed')
     parse.add_argument('--multiprocess', default=1, type=int, help='how many process for asynchronous actor')
+    parse.add_argument('--dual_lr', default=1e-4, type=float, help='dual variable learning rate')
+    parse.add_argument('--warmup', default=1e2, type=float, help='number of warmup epochs')
 
     args = parse.parse_args()
 
@@ -48,8 +49,6 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
     device = args.device
 
     writer = SummaryWriter(args.logdir)
-    stop_episode = 30
-    stop_episode_reward = np.zeros((k,))
     i = 0
     while True:
         i += 1
@@ -59,7 +58,7 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
         trajectory = []
         while True:
             action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
-            next_state, reward, done = env.step(action[0])
+            next_state, reward, done = env.step(action)
             energy_penalty = np.array([-np.linalg.norm(action)])
             trajectory.append((state, action, reward, log_prob, [int(done)]))
             state = next_state
@@ -73,86 +72,115 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
         agent._replay_buffer.push(trajectory)
     
         loss = agent.update(i)
+        writer.add_scalar('eps', args.eps, i)
+        writer.add_scalar('alpha_mean', agent._alpha_mean, i)
+        writer.add_scalar('alpha_std', agent._alpha_std, i)
+        writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), i)
+        writer.add_scalars('loss', loss, i)
 
         # print result
         print(f"Episode: {i}, length: {t} ", end='')
         for j in range(episode_reward.shape[0]):
             print(f'reward{j}: {episode_reward[j]:.5f} ', end='')
         print()
-        print(f'[Epsiode: {i}, loss_temperature: {loss["loss_temperature"]:.5f}, loss_policy: {loss["loss_policy"]:.5f}]')
-        print(f'loss_alpha_mean: {loss["loss_alpha_mean"]:.5f}, loss_alpha_std: {loss["loss_alpha_std"]:.5f}, loss_critic: {loss["loss_critic"]:.5f}]')
 
         # log result in tensorboard
-        for j in range(episode_reward.shape[0]):
-            writer.add_scalar(f'reward_{j}', episode_reward[j], i)
-
-        # check convergence
-        if np.array_equal(episode_reward, stop_episode_reward):
-            print(stop_episode)
-            stop_episode -= 1
-            if stop_episode == 0:
-                with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
-                    f.write(f'Epsiode: {i}\n')
-                    f.write('Converge at: ')
-                    for j in range(episode_reward.shape[0]):
-                        f.write(f'reward{j}: {episode_reward[j]} ')
-                break
-        else:
-            stop_episode = 30
-            stop_episode_reward = episode_reward
-
-    agent.save(args.logdir)
+        if i % 100 == 0:
+            avg_reward = test(agent, args, k)
+            for j in range(avg_reward.shape[0]):
+                writer.add_scalar(f'test_reward_{j}', avg_reward[j], i)
 
 
-
-
-def MultiTrain(shared_actor, args, k, state_dim, action_dim):
+def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
     env = args.env
     device = args.device
 
     # asyncronous actor
     agent = BehaviorGaussianMPO(state_dim, action_dim)
+    agent._actor.train()
+    print_freq = 100
+    episode_reward = np.zeros((2,))
 
-    for i in range(args.train_iter): 
-        # load new actor
-        print('loading new actor...')
-        agent._actor.load_state_dict(shared_actor.state_dict())
-        print('finish')
-        time.sleep(100000)
-
+    for i in range(1, int(args.train_iter) + 1): 
+        replay_buffer = []
         state = env.reset()
         t = 0
         episode_reward = np.zeros((k))
         trajectory = []
         while True:
-            action, log_prob = agent.select_action(torch.tensor(state, device=device))
+            action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
+            energy_penalty = np.array([-np.linalg.norm(action)])
             trajectory.append((state, [action], reward, [log_prob], [int(done)]))
+            episode_reward += np.concatenate([reward, energy_penalty])
             state = next_state
             episode_reward += reward
             t += 1
+            args.eps -= (1 - args.eps_min) / args.eps_decay
+            args.eps = max(args.eps, args.eps_min)
             if done:
                 break
 
-        print(f"Episode: {i}, length: {t} ")
-        for i in range(episode_reward.shape[0]):
-            print(f'reward{i}: {episode_reward[i]} ', end='')
-        print()
+        if i % print_freq == 0:
+            print(f"Episode: {i}, length: {t} ")
+            for i in range(episode_reward.shape[0]):
+                print(f'reward{i}: {episode_reward[i]} ', end='')
+            print()
 
-        # replay_buffer.push(trajectory)
+        replay_buffer_q.put_nowait(replay_buffer)
+        try:
+            actor = actor_q.get_nowait()
+            if actor:
+                agent._actor.load_state_dict(actor)
+                agent._actor.train()
+        except:
+            pass
 
 
-def Learner(agent: GaussianMOMPOHumanoid, ps):
+def recieve_transition(agent: GaussianMOMPOHumanoid, replay_buffer_q):
+    while True:
+        while not replay_buffer_q.empty():
+            transitions = replay_buffer_q.get()
+            agent._replay_buffer.push(transitions)
+
+
+
+def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k):
+    writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
+    # use threads to recieve transition from actor
+    threads = [
+        Thread(target=recieve_transition, kwargs={'agent': agent, 'replay_buffer_q': replay_buffer_q})
+    ]
+    for thread in threads:
+        thread.start()
+
     while not all_ps_finish:
+        agent._actor.train()
         t += 1
-        agent.update(t)
+        while not replay_buffer_q.empty():
+            transitions = replay_buffer_q.get()
+            agent._replay_buffer.push(transitions)
+        # wait for replay buffer has element; TODO write it in other way
+        while (not agent._replay_buffer._isfull) and agent._replay_buffer._idx == 0:
+            pass
+        loss = agent.update(t)
+        writer.add_scalar('alpha_mean', agent._alpha_mean, t)
+        writer.add_scalar('alpha_std', agent._alpha_mean, t)
+        writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), t)
+        writer.add_scalars('loss', loss, t)
         all_ps_finish = True
         for p in ps:
             if p.is_alive():
                 all_ps_finish = False
                 break
+        if t % 100 == 0:
+            avg_reward = test(agent, args, k)
+            for j in range(avg_reward.shape[0]):
+                writer.add_scalar(f'test_reward_{j}', avg_reward[j], t)
+        for _ in range(args.multiprocess):
+            actor_q.put(agent._actor.state_dict())
 
 
 def test(agent: GaussianMOMPOHumanoid, args, k):
@@ -162,31 +190,39 @@ def test(agent: GaussianMOMPOHumanoid, args, k):
     env = args.env
     device = args.device
 
-    for i in range(args.epochs):
+    for i in range(args.test_iter):
         state = env.reset()
-        episode_reward = np.zeros((k))
+        episode_reward = np.zeros((2,))
         t = 0
         while True:
-            action = agent.select_action(torch.tensor(state, device=device))
+            action, _ = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
-            episode_reward += reward
+            energy_penalty = np.array([-np.linalg.norm(action)])
             state = next_state
+            episode_reward += np.concatenate([reward, energy_penalty])
             t += 1
             if done:
                 break
         rewards.append(episode_reward)
-        print(f"Episode: {i}, length: {t}, ", end='')
-        for i in range(episode_reward.shape[0]):
-            print(f'reward{i}: {episode_reward[i]} ', end='')
-        print()
-    avg_reward = np.stack(rewards, axis=-1).mean(axis=-1)
+    rewards = np.stack(rewards, axis=-1)
+    avg_reward = rewards.mean(axis=-1)
+    print("[TEST] ", end='')
     for i in range(episode_reward.shape[0]):
-        print(f'reward{i}: {avg_reward[i]} ', end='')
+        print(f'reward{i}: {avg_reward[i]:.2f} ', end='')
     print()
+
+    # check if all objective rewards are identical
+    if (rewards == rewards[0]).all() and avg_reward[0] >= args.tolerance:
+        with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
+                    f.write(f'Epsiode: {i}\n')
+                    f.write('Converge at: ')
+                    for j in range(episode_reward.shape[0]):
+                        f.write(f'reward{j}: {episode_reward[j]:.2f} ')
+    agent.save(args.logdir)
+    return avg_reward
 
 
 def main():
-    # TODO: change GaussianMOMPO to Categorical MOMPO
     args = parse_args()
     args.logdir = os.path.join(args.logdir, args.env, args.epsilons)
     os.makedirs(args.logdir, exist_ok=True)
@@ -228,7 +264,11 @@ def main():
                                   beta_mean=args.beta_mean,
                                   beta_std=args.beta_std,
                                   lr=args.lr,
-                                  adam_eps=args.adam_eps)
+                                  dual_lr=args.dual_lr,
+                                  adam_eps=args.adam_eps,
+                                  epsilon=args.epsilons, 
+                                  k=k,
+                                  device=args.device)
     agent._actor.share_memory()
 
     if args.model != '':
@@ -237,13 +277,15 @@ def main():
     if args.test_only:
         test(agent, args, k)
     elif args.multiprocess > 1:
+        torch.multiprocessing.set_start_method('spawn')
+        replay_buffer_q = mp.Queue()
+        actor_q = mp.Queue()
         ps = []
         for i in range(args.multiprocess):
-            ps.append(mp.Process(target=MultiTrain, args=(agent._actor, args, k, state_dim, action_dim)))
+            ps.append(mp.Process(target=MultiTrain, args=(args, k, state_dim, action_dim, replay_buffer_q, actor_q)))
         for p in ps:
             p.start()
-        time.sleep(100000)
-        Learner(agent, ps)
+        Learner(agent, ps, actor_q, replay_buffer_q, args, k)
         for p in ps:
             p.join()
     else:
