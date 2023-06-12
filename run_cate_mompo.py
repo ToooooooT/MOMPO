@@ -181,6 +181,7 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
         # wait for replay buffer has element; TODO write it in other way
         while (not agent._replay_buffer._isfull) and agent._replay_buffer._idx == 0:
             pass
+        print('----------------- update -----------------')
         loss = agent.update(t)
         writer.add_scalar('alpha', agent._alpha, t)
         writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), t)

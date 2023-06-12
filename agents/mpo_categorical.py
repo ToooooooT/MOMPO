@@ -162,24 +162,17 @@ class CategoricalMPO(BehaviorCategoricalMPO):
     def update(self, t):
         states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
         states = states.to(self._device)
-        target_actions = []
         q_value = []
         with torch.no_grad():
             target_action_probs = self._target_actor(states) # (B, D)
             target_distribution = Categorical(logits=target_action_probs)
-            for i in range(self._actions_sample_per_state):
-                target_action = target_distribution.sample().view(-1, 1)  # (B, 1)
-                target_actions.append(target_action)
+            target_actions = target_distribution.sample((self._actions_sample_per_state,)) # (N, B)
+            # `action`: one-hot encoding of `target_action` for critic input
+            action = F.one_hot(target_actions, num_classes=self._action_dim) # (N, B, D)
+            q_value = self._target_critic(states.unsqueeze(0).repeat(self._actions_sample_per_state, 1, 1), action) # (N, B, K)
 
-                # `action`: one-hot encoding of `target_action` for critic input
-                action = torch.zeros_like(target_action_probs).to(self._device) # (B, D)
-                for i in range(target_action.shape[0]):
-                    action[i][target_action[i].item()] = 1
-                
-                q_value.append(self._target_critic(states, action)) # (B, K)
-
-        target_actions = torch.stack(target_actions, dim=1) # (B, N, 1)
-        q_value = torch.stack(q_value, dim=1) # (B, N, K)
+        target_actions = target_actions.transpose(1, 0).unsqueeze(dim=-1) # (B, N, 1)
+        q_value = q_value.permute(1, 0, 2) # (B, N, K)
 
         # update temperature
         loss_temperature, normalized_weights = self.update_temperature(q_value)
@@ -256,32 +249,26 @@ class CategoricalMPO(BehaviorCategoricalMPO):
         states, actions, rewards, next_states, log_probs, dones \
             = self._replay_buffer.sample(self._batch_size)
         states = states.to(self._device).to(torch.float) # (B, S)
-        actions = actions.to(self._device).to(torch.float) # (B, 1)
+        actions = actions.to(self._device) # (B, 1)
         rewards = rewards.to(self._device).to(torch.float) # (B, 1)
         next_states = next_states.to(self._device).to(torch.float) # (B, S)
         log_probs = log_probs.to(self._device) # (B, 1)
         dones = dones.to(self._device).to(torch.float) # (B, 1)
 
-        batch_size = states.size(0)
-
         with torch.no_grad():
             target_action_probs = self._target_actor(next_states)  # (B, D)
             m = Categorical(logits=target_action_probs)
-            _target_actions = m.sample()
-
+            _target_actions = m.sample() # (B,)
             # one-hot target actions for target critic input
-            target_actions = torch.zeros_like(target_action_probs).to(self._device) # (B, D)
-            for i in range(batch_size):
-                target_actions[i, int(_target_actions[i].item())] = 1
-            
+            target_actions = F.one_hot(_target_actions, num_classes=self._action_dim) # (B, D)
             target_q_values = rewards + self._gamma * self._target_critic(next_states, target_actions) * (1 - dones)
 
         # one-hot actions for critic input
-        actions_onehot = torch.zeros(batch_size, self._action_dim).to(self._device)
-        for i in range(batch_size):
-            actions_onehot[i, int(actions[i].item())] = 1
-
-        q_values = self._critic(states, actions_onehot) # (T, K)
+        actions_onehot = F.one_hot(actions.to(torch.int64), num_classes=self._action_dim) # (B, D)
+        if actions_onehot.dim() == 3:
+            q_values = self._critic(states, actions_onehot.squeeze(dim=1)) # (B, K)
+        else:
+            q_values = self._critic(states, actions_onehot) # (B, K)
         criterion = F.mse_loss
         loss = criterion(q_values, target_q_values).sum(dim=-1)
         self._critic_optimizer.zero_grad()

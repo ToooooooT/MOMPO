@@ -179,11 +179,11 @@ class GaussianMPO(BehaviorGaussianMPO):
         with torch.no_grad():
             target_mean, target_std = self._target_actor(states) # (B, D)
             target_normal_distribution = Normal(target_mean, target_std)
-            for i in range(self._actions_sample_per_state):
-                target_actions.append(target_normal_distribution.sample()) # (B, D)
-                q_value.append(self._target_critic(states, target_actions[i])) # (B, K)
-        target_actions = torch.stack(target_actions, dim=1) # (B, N, D)
-        q_value = torch.stack(q_value, dim=1) # (B, N, K)
+            target_actions = target_normal_distribution.sample(sample_shape=(self._actions_sample_per_state,)) # (N, B, D)
+            q_value = self._target_critic(states.unsqueeze(0).repeat(self._actions_sample_per_state, 1, 1), target_actions) # (N, B, K)
+
+        target_actions = target_actions.permute(1, 0, 2) # (B, N, D)
+        q_value = q_value.permute(1, 0, 2) # (B, N, K)
 
         # update temperature
         loss_temperature, normalized_weights = self.update_temperature(q_value)
@@ -530,14 +530,13 @@ class GaussianMOMPOHumanoid(GaussianMOMPO):
         with torch.no_grad():
             target_mean, target_std = self._target_actor(states) # (B, D)
             target_normal_distribution = Normal(target_mean, target_std)
-            for i in range(self._actions_sample_per_state):
-                target_actions.append(target_normal_distribution.sample()) # (B, D)
-                q_value_1 = self._target_critic(states, target_actions[i]) # (B, 1)
-                # compute the second objective of q value function, which is limiting enrgy usage = -||a||_2
-                q_value_2 = -torch.norm(target_actions[i], dim=-1, keepdim=True)
-                q_value.append(torch.cat([q_value_1, q_value_2], dim=-1)) # (B, 2)
-        target_actions = torch.stack(target_actions, dim=1) # (B, N, D)
-        q_value = torch.stack(q_value, dim=1) # (B, N, K)
+            target_actions = target_normal_distribution.sample(sample_shape=(self._actions_sample_per_state,)) # (N, B, D)
+            q_value_1 = self._target_critic(states.unsqueeze(0).repeat(self._actions_sample_per_state, 1, 1), target_actions) # (N, B, 1)
+            # compute the second objective of q value function, which is limiting enrgy usage = -||a||_2
+            q_value_2 = -torch.norm(target_actions, dim=-1, keepdim=True) # (N, B, 1)
+
+        target_actions = target_actions.permute(1, 0, 2) # (B, N, D)
+        q_value = torch.cat([q_value_1, q_value_2], dim=-1).permute(1, 0, 2) # (B, N, 2)
 
         # update temperature
         loss_temperature, normalized_weights = self.update_temperature(q_value)
@@ -622,14 +621,13 @@ class GaussianScalarizedMPOHumanoid(GaussianScalarizedMPO):
         with torch.no_grad():
             target_mean, target_std = self._target_actor(states) # (B, D)
             target_normal_distribution = Normal(target_mean, target_std)
-            for i in range(self._actions_sample_per_state):
-                target_actions.append(target_normal_distribution.sample()) # (B, D)
-                q_value_1 = self._target_critic(states, target_actions[i]) # (B, 1)
-                # compute the second objective of q value function, which is limiting enrgy usage = -||a||_2
-                q_value_2 = -torch.norm(target_actions, dim=-1, keepdim=True)
-                q_value.append(torch.cat([q_value_1, q_value_2], dim=-1)) # (B, 2)
-        target_actions = torch.stack(target_actions, dim=1) # (B, N, D)
-        q_value = torch.stack(q_value, dim=1) # (B, N, K)
+            target_actions = target_normal_distribution.sample(sample_shape=(self._actions_sample_per_state,)) # (N, B, D)
+            q_value_1 = self._target_critic(states.unsqueeze(0).repeat(self._actions_sample_per_state, 1, 1), target_actions) # (N, B, 1)
+            # compute the second objective of q value function, which is limiting enrgy usage = -||a||_2
+            q_value_2 = -torch.norm(target_actions, dim=-1, keepdim=True) # (N, B, 1)
+
+        target_actions = target_actions.permute(1, 0, 2) # (B, N, D)
+        q_value = torch.cat([q_value_1, q_value_2], dim=-1).permute(1, 0, 2) # (B, N, 2)
 
         # update temperature
         loss_temperature, normalized_weights = self.update_temperature(q_value)
