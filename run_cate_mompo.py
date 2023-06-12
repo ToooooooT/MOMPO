@@ -225,7 +225,9 @@ def test(agent: CategoricalMOMPO, args, k):
         print("(Pareto front)")
 
     # check if all objective rewards are identical
-    if (rewards == rewards[0]).all() and avg_reward[0] >= args.tolerance:
+    n_converged = (rewards[0] >= args.tolerance).count_nonzero().item()
+    if is_pareto_front and n_converged > (args.test_iter // 2):
+        print(f"Converged with {n_converged} samples satisfying the target reward {args.tolerance}")
         with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
             f.write(f'Epsiode: {i}\n')
             f.write('Converge at: ')
