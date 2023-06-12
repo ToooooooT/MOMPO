@@ -365,7 +365,7 @@ class GaussianMOMPO(GaussianMPO):
         '''
         B, N, K = q_value.size()
         temperatures = F.softplus(self._temperatures) + 1e-8
-        tempered_q_values = q_value / temperatures.reshape(1, 1, self._k)
+        tempered_q_values = q_value / temperatures.reshape(1, 1, temperatures.shape[0])
 
         # compute normlized importance weights
         normalized_weights = F.softmax(tempered_q_values, dim=1)
@@ -517,6 +517,10 @@ class GaussianMOMPOHumanoid(GaussianMOMPO):
                          k, 
                          alpha_mean, 
                          alpha_std)
+
+
+        self._temperatures = torch.tensor(np.array([temperature] * 2), dtype=torch.float, requires_grad=True, device=device)
+        self._temperatures_optimizer = optim.Adam([self._temperatures], lr=dual_lr, eps=adam_eps)
 
     def update(self, t):
         states = self._replay_buffer.sample_states(self._batch_size) # (B, S)
