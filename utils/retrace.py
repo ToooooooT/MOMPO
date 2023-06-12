@@ -43,15 +43,8 @@ class GaussianRetrace(Retrace):
         '''
         # help us build the target distribution
         def action_distribution(_states):
-            with torch.no_grad():
-                means, stds = [], []
-                for i in range(self._retrace_seq_size):
-                    mean, std = self._actor(_states[:, i, :]) # (B, D)
-                    means.append(mean)
-                    stds.append(std)
-                mean = torch.stack(means, dim=1) #(B, R, D)
-                std = torch.stack(stds, dim=1) #(B, R, D)
-                
+            mean, std = self._actor(_states) # (B, R, D)
+
             return Normal(mean, std)
 
 
@@ -67,19 +60,13 @@ class GaussianRetrace(Retrace):
             # Monte-Carlo method to estimate the target values of the next states V(s_{j+1})
             target_values = torch.zeros((*next_states.shape[:2], self._k), dtype=torch.float, device=self._device) # (B, R, K)
             next_target_distribution = action_distribution(next_states)
-            sample_num = 1000
+            sample_num = 400
             actions_mc = next_target_distribution.sample(sample_shape=(sample_num,)) # (sample_num, B, R, D)
-            for actions_est in actions_mc:
-                for i in range(self._retrace_seq_size):
-                    Q_est = self._critic(next_states[:, i, :], actions_est[:, i, :]) # (B, K)
-                    target_values[:, i, :] += Q_est
-            target_values /= sample_num
+            next_states = next_states.unsqueeze(0).repeat(sample_num, 1, 1, 1)
+            target_values = self._critic(next_states, actions_mc).mean(dim=0) # (sample_num, B, K)
 
-            target_q_values = []
-            for i in range(self._retrace_seq_size):
-                target_q_value = self._critic(states[:, i, :], actions[:, i, :]) # (B, K)
-                target_q_values.append(target_q_value)
-            target_q_values = torch.stack(target_q_values, dim=1) # (B, R, K)
+            # compute target q values
+            target_q_values = self._critic(states, actions) # (B, R, K)
 
             # mask target done; example : (0, 0, 1, 0, 0) -> (0, 0, 1, 1, 1)
             mask_target_dones = (dones.cumsum(dim=1) > 0).type(torch.float)
