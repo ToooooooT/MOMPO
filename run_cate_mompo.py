@@ -22,7 +22,7 @@ def parse_args():
     parse.add_argument('--alpha', default=0.01, type=float, help='the Lagrangian multiplier for the policy update constraint')
     parse.add_argument('--beta', default=0.001, type=float, help='KL constraint on the change of policy')
     parse.add_argument('--gamma', default=0.999, type=float, help='discount factor')
-    parse.add_argument('--epsilons', default='0.075,0.05', type=str, help='epsilon of different objective')
+    parse.add_argument('--epsilons', default='0.025,0.05', type=str, help='epsilon of different objective')
     parse.add_argument('--tolerance', default=0.7, type=float, help='the reward tolerance for convergence')
     parse.add_argument('--eps', default=0., type=float, help='epsilon for exploration')
     parse.add_argument('--eps_min', default=0., type=float, help='minimum of epsilon for exploration')
