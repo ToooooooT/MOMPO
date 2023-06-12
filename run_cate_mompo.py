@@ -161,7 +161,6 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
     writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
-    time.sleep(3)
     while not all_ps_finish:
         agent._actor.train()
         t += 1
@@ -169,6 +168,9 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
             transitions = replay_buffer_q.get()
             for transition in transitions:
                 agent._replay_buffer.push(*transition)
+        # wait for replay buffer has element; TODO write it in other way
+        while not agent._replay_buffer._isfull or agent._replay_buffer._idx == 0:
+            pass
         loss = agent.update(t)
         writer.add_scalar('alpha', agent._alpha, t)
         writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), t)
@@ -241,7 +243,6 @@ def test(agent: CategoricalMOMPO, args, k):
     return avg_reward, pareto_front_err
 
 def main():
-    torch.multiprocessing.set_start_method('spawn')
     args = parse_args()
     args.logdir = os.path.join(args.logdir, args.env, args.epsilons + ',' + str(args.alpha))
     os.makedirs(args.logdir, exist_ok=True)
@@ -279,6 +280,7 @@ def main():
     if args.test_only:
         avg_reward, pareto_front_err = test(agent, args, k)
     elif args.multiprocess > 1:
+        torch.multiprocessing.set_start_method('spawn')
         replay_buffer_q = mp.Queue()
         actor_q = mp.Queue()
         ps = []

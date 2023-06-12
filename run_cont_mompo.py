@@ -48,8 +48,6 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
     device = args.device
 
     writer = SummaryWriter(args.logdir)
-    stop_episode = 30
-    stop_episode_reward = np.zeros((k,))
     i = 0
     while True:
         i += 1
@@ -109,7 +107,7 @@ def MultiTrain(args, k, state_dim, action_dim, replay_buffer_q, actor_q):
         episode_reward = np.zeros((k))
         trajectory = []
         while True:
-            action, log_prob = agent.select_action(torch.tensor(state, device=device), args.eps)
+            action, log_prob = agent.select_action(torch.tensor(state, dtype=torch.float, device=device))
             next_state, reward, done = env.step(action)
             trajectory.append((state, [action], reward, [log_prob], [int(done)]))
             state = next_state
@@ -142,14 +140,15 @@ def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k)
     writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
-    time.sleep(3)
     while not all_ps_finish:
         agent._actor.train()
         t += 1
         while not replay_buffer_q.empty():
             transitions = replay_buffer_q.get()
-            for transition in transitions:
-                agent._replay_buffer.push(*transition)
+            agent._replay_buffer.push(transitions)
+        # wait for replay buffer has element; TODO write it in other way
+        while not agent._replay_buffer._isfull or agent._replay_buffer._idx == 0:
+            pass
         loss = agent.update(t)
         writer.add_scalar('alpha_mean', agent._alpha_mean, t)
         writer.add_scalar('alpha_std', agent._alpha_mean, t)
@@ -175,7 +174,7 @@ def test(agent: GaussianMOMPOHumanoid, args, k):
     env = args.env
     device = args.device
 
-    for i in range(args.epochs):
+    for i in range(args.test_iter):
         state = env.reset()
         episode_reward = np.zeros((k))
         t = 0
@@ -203,7 +202,7 @@ def test(agent: GaussianMOMPOHumanoid, args, k):
                     f.write('Converge at: ')
                     for j in range(episode_reward.shape[0]):
                         f.write(f'reward{j}: {episode_reward[j]:.2f} ')
-        agent.save(args.logdir)
+    agent.save(args.logdir)
     return avg_reward
 
 
@@ -262,6 +261,7 @@ def main():
     if args.test_only:
         test(agent, args, k)
     elif args.multiprocess > 1:
+        torch.multiprocessing.set_start_method('spawn')
         replay_buffer_q = mp.Queue()
         actor_q = mp.Queue()
         ps = []
