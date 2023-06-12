@@ -1,6 +1,7 @@
 from agents import GaussianMOMPOHumanoid, BehaviorGaussianMPO
 from dm_control import viewer
 from envs.humanoid.MO_humannoid import MOHumanoid_run
+import time
 
 import argparse
 import os
@@ -166,13 +167,11 @@ def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k)
     while not all_ps_finish:
         agent._actor.train()
         t += 1
-        while not replay_buffer_q.empty():
-            transitions = replay_buffer_q.get()
-            agent._replay_buffer.push(transitions)
         # wait for replay buffer has element; TODO write it in other way
         while (not agent._replay_buffer._isfull) and agent._replay_buffer._idx == 0:
             pass
         loss = agent.update(t)
+        print('----------------- update -----------------')
         writer.add_scalar('alpha_mean', agent._alpha_mean, t)
         writer.add_scalar('alpha_std', agent._alpha_mean, t)
         writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), t)
