@@ -1,4 +1,4 @@
-from agents.mpo_humanoid import CategoricalMOMPO, BehaviorCategoricalMPO
+from agents import CategoricalMOMPO, BehaviorCategoricalMPO
 from envs.deep_sea_treasure import DeepSeaTreasure
 
 import argparse
@@ -6,6 +6,8 @@ import os
 import numpy as np
 import time
 import random
+
+from sklearn.metrics import mean_absolute_error
 
 import torch
 import torch.multiprocessing as mp
@@ -41,7 +43,19 @@ def parse_args():
 
 
 action_repr = ['U', 'D', 'L', 'R']
-
+pareto_front_map = {
+    0.0 :  0,
+    0.7 : -1,
+    8.2 : -3,
+    11.5: -5,
+    14.0: -7,
+    15.1: -8,
+    16.1: -9,
+    19.6: -13,
+    20.3: -14,
+    22.4: -17,
+    23.7: -19,
+}
 
 def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
     env = args.env
@@ -95,7 +109,8 @@ def SingleTrain(agent: CategoricalMOMPO, args, k, verbose=False):
 
         # log result in tensorboard
         if i % 100 == 0:
-            avg_reward = test(agent, args, k)
+            avg_reward, pareto_front_err = test(agent, args, k)
+            writer.add_scalar("pareto-front error", pareto_front_err, i)
             for j in range(avg_reward.shape[0]):
                 writer.add_scalar(f'test_reward_{j}', avg_reward[j], i)
 
@@ -146,7 +161,6 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
     writer = SummaryWriter(args.logdir)
     all_ps_finish = False
     t = 0
-    time.sleep(3)
     while not all_ps_finish:
         agent._actor.train()
         t += 1
@@ -154,6 +168,9 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
             transitions = replay_buffer_q.get()
             for transition in transitions:
                 agent._replay_buffer.push(*transition)
+        # wait for replay buffer has element; TODO write it in other way
+        while not agent._replay_buffer._isfull or agent._replay_buffer._idx == 0:
+            pass
         loss = agent.update(t)
         writer.add_scalar('alpha', agent._alpha, t)
         writer.add_scalars('temperature', dict(zip(['k1', 'k2'], agent._temperatures.tolist())), t)
@@ -164,7 +181,8 @@ def Learner(agent: CategoricalMOMPO, ps, actor_q, replay_buffer_q, args, k):
                 all_ps_finish = False
                 break
         if t % 100 == 0:
-            avg_reward = test(agent, args, k)
+            avg_reward, pareto_front_err = test(agent, args, k)
+            writer.add_scalar("pareto-front error", pareto_front_err, t)
             for j in range(avg_reward.shape[0]):
                 writer.add_scalar(f'test_reward_{j}', avg_reward[j], t)
         for _ in range(args.multiprocess):
@@ -191,25 +209,40 @@ def test(agent: CategoricalMOMPO, args, k):
             if done:
                 break
         rewards.append(episode_reward)
+
+    # check if pareto-front policy
+    rewards0, rewards1 = np.array(list(zip(*rewards)))
+    pareto_front = np.array(list(map(pareto_front_map.get, rewards0)))
+
+    pareto_front_err = mean_absolute_error(pareto_front, rewards1)
+    is_pareto_front = (rewards1 == pareto_front).all()
+
     rewards = np.stack(rewards, axis=-1)
     avg_reward = rewards.mean(axis=-1)
+
     print("[TEST] ", end='')
     for i in range(episode_reward.shape[0]):
         print(f'reward{i}: {avg_reward[i]:.2f} ', end='')
+
+    if is_pareto_front:
+        print("(Pareto front)", end='')
+
     print()
 
     # check if all objective rewards are identical
-    if (rewards == rewards[0]).all() and avg_reward[0] >= args.tolerance:
+    n_converged = np.count_nonzero(rewards[0] >= args.tolerance)
+    if is_pareto_front and n_converged > (args.test_iter // 2):
+        print(f"Converged with {n_converged} samples satisfying the target reward {args.tolerance}")
         with open(os.path.join(args.logdir, 'convergence.txt'), 'w') as f:
             f.write(f'Epsiode: {i}\n')
             f.write('Converge at: ')
             for j in range(episode_reward.shape[0]):
                 f.write(f'reward{j}: {episode_reward[j]:.2f} ')
+    
     agent.save(args.logdir)
-    return avg_reward
+    return avg_reward, pareto_front_err
 
 def main():
-    torch.multiprocessing.set_start_method('spawn')
     args = parse_args()
     args.logdir = os.path.join(args.logdir, args.env, args.epsilons + ',' + str(args.alpha))
     os.makedirs(args.logdir, exist_ok=True)
@@ -229,7 +262,8 @@ def main():
 
     args.epsilons = np.array([float(x) for x in args.epsilons.split(',')])
 
-    agent = CategoricalMOMPO(state_dim, action_dim,
+    agent = CategoricalMOMPO(state_dim, 
+                             action_dim,
                              gamma=args.gamma, 
                              epsilon=args.epsilons, 
                              beta=args.beta, 
@@ -244,8 +278,9 @@ def main():
         agent.load(args.model)
 
     if args.test_only:
-        test(agent, args, k)
+        avg_reward, pareto_front_err = test(agent, args, k)
     elif args.multiprocess > 1:
+        torch.multiprocessing.set_start_method('spawn')
         replay_buffer_q = mp.Queue()
         actor_q = mp.Queue()
         ps = []
