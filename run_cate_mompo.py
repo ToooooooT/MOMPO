@@ -222,7 +222,9 @@ def test(agent: CategoricalMOMPO, args, k):
         print(f'reward{i}: {avg_reward[i]:.2f} ', end='')
 
     if is_pareto_front:
-        print("(Pareto front)")
+        print("(Pareto front)", end='')
+
+    print()
 
     # check if all objective rewards are identical
     n_converged = np.count_nonzero(rewards[0] >= args.tolerance)
