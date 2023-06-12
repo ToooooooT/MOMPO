@@ -229,26 +229,25 @@ class GaussianMPO(BehaviorGaussianMPO):
         '''
         alpha_mean, alpha_std = F.softplus(self._alpha_mean) + 1e-8, F.softplus(self._alpha_std) + 1e-8
 
+        normalized_weights = normalized_weights.sum(dim=-1, keepdim=True).permute(1, 0, 2)
         mean, std = self._actor(states)  # (batch_size, action_dim)
         target_distribution = Normal(target_mean, target_std)
         fixed_std_distribution = Normal(mean, target_std)
         fixed_mean_distribution = Normal(target_mean, std)
+        fixed_std_kl = kl_divergence(target_distribution, fixed_std_distribution)
+        fixed_mean_kl = kl_divergence(target_distribution, fixed_mean_distribution)
 
         # average over the batch
-        loss_fixed_std = -fixed_std_distribution.log_prob(target_actions.permute(1, 0, 2)) * \
-                                normalized_weights.sum(dim=-1, keepdim=True).permute(1, 0, 2) # [N, B, D]
+        loss_fixed_std = -fixed_std_distribution.log_prob(target_actions.permute(1, 0, 2)) * normalized_weights # [N, B, D]
         loss_fixed_std = torch.sum(loss_fixed_std.mean(dim=1))
 
-        loss_fixed_mean = -fixed_mean_distribution.log_prob(target_actions.permute(1, 0, 2)) * \
-                                normalized_weights.sum(dim=-1, keepdim=True).permute(1, 0, 2) # [N, B, D]
+        loss_fixed_mean = -fixed_mean_distribution.log_prob(target_actions.permute(1, 0, 2)) * normalized_weights # [N, B, D]
         loss_fixed_mean = torch.sum(loss_fixed_mean.mean(dim=1))
 
-        loss_beta_mean = alpha_mean.detach() * \
-                            (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)) # [B, D]
+        loss_beta_mean = alpha_mean.detach() * (self._beta_mean - fixed_std_kl) # [B, D]
         loss_beta_mean = torch.sum(loss_beta_mean.mean(dim=0))
 
-        loss_beta_std = alpha_std.detach() * \
-                            (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)) # [B, D]
+        loss_beta_std = alpha_std.detach() * (self._beta_std - fixed_mean_kl) # [B, D]
         loss_beta_std = torch.sum(loss_beta_std.mean(dim=0))
         
         # policy optimization
@@ -259,8 +258,7 @@ class GaussianMPO(BehaviorGaussianMPO):
         self._actor_optimizer.step()
 
         # update alpha std
-        loss_alpha_std = alpha_std * \
-                        (self._beta_std - kl_divergence(target_distribution, fixed_mean_distribution)).detach() # [B, D]
+        loss_alpha_std = alpha_std * (self._beta_std - fixed_mean_kl.detach()) # [B, D]
         loss_alpha_std = torch.sum(loss_alpha_std.mean(dim=0))
         self._alpha_std_optimizer.zero_grad()
         loss_alpha_std.backward()
@@ -269,8 +267,7 @@ class GaussianMPO(BehaviorGaussianMPO):
 
 
         # update alpha mean
-        loss_alpha_mean = alpha_mean * \
-                        (self._beta_mean - kl_divergence(target_distribution, fixed_std_distribution)).detach() # [B, D]
+        loss_alpha_mean = alpha_mean * (self._beta_mean - fixed_std_kl.detach()) # [B, D]
         loss_alpha_mean = torch.sum(loss_alpha_mean.mean(dim=0))
         self._alpha_mean_optimizer.zero_grad()
         loss_alpha_mean.backward()
