@@ -44,6 +44,7 @@ def parse_args():
 
 action_repr = ['U', 'D', 'L', 'R']
 pareto_front_map = {
+    0.0 :  0,
     0.7 : -1,
     8.2 : -3,
     11.5: -5,
