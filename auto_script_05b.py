@@ -8,4 +8,4 @@ alpha = .01
 for ratio, tol in zip(ratio_set, tolerance):
     print(f"Running setting ratio={ratio}, tol={tol} ...")
     eps_treasure = ratio * eps_time
-    os.system(f"python run_cate_mompo.py --epsilons \"{eps_treasure},{eps_time}\" --tolerance {tol} --alpha {alpha}")
+    os.system(f"python run_cate_mompo.py --epsilons \"{eps_treasure:.4f},{eps_time:.2f}\" --tolerance {tol} --alpha {alpha}")
