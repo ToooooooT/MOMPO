@@ -21,6 +21,8 @@ def parse_args():
     parse.add_argument('--env', default='humanoid_run', type=str, help='environment name')
     parse.add_argument('--beta_mean', default=5e-3, type=int, help='KL constraint on the change of policy mean')
     parse.add_argument('--beta_std', default=1e-3, type=int, help='KL constraint on the change of policy variance')
+    parse.add_argument('--alpha_mean', default=0.01, type=float, help='the Lagrangian multiplier for the policy update constraint on mean')
+    parse.add_argument('--alpha_std', default=0.01, type=float, help='the Lagrangian multiplier for the policy update constraint on std')
     parse.add_argument('--gamma', default=0.999, type=int, help='discount factor')
     parse.add_argument('--tanh_on_action_mean', default=False, action='store_true')
     parse.add_argument('--tanh_on_action', default=False, action='store_true')
@@ -33,7 +35,7 @@ def parse_args():
     parse.add_argument('--eps_decay', default=1e5, type=int, help='minimum of epsilon for exploration')
     parse.add_argument('--test_only', default=False, action='store_true')
     parse.add_argument('--train_iter', default=1e7, type=int, help='training iterations')
-    parse.add_argument('--test_iter', default=10, type=int, help='testing iterations')
+    parse.add_argument('--test_iter', default=1, type=int, help='testing iterations')
     parse.add_argument('--device', default='cpu', type=str, help='device')
     parse.add_argument('--seed', default=1, type=int, help='random seed')
     parse.add_argument('--multiprocess', default=1, type=int, help='how many process for asynchronous actor')
@@ -92,9 +94,10 @@ def SingleTrain(agent: GaussianMOMPOHumanoid, args, k):
                 writer.add_scalar(f'test_reward_{j}', avg_reward[j], i)
 
 
-def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_q, actor_q):
+def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_q, actor_q, pid):
     env = args.env
     device = args.device
+    writer = SummaryWriter(args.logdir)
 
     # asyncronous actor
     agent = BehaviorGaussianMPO(state_dim, 
@@ -131,8 +134,9 @@ def MultiTrain(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_
 
         if i % print_freq == 0:
             print(f"Episode: {i}, length: {t} ")
-            for i in range(episode_reward.shape[0]):
-                print(f'reward{i}: {episode_reward[i]} ', end='')
+            for j in range(episode_reward.shape[0]):
+                print(f'reward{i}: {episode_reward[j]} ', end='')
+                writer.add_scalar(f'reward{i}_{pid}', episode_reward[j], i)
             print()
 
         replay_buffer_q.put_nowait(trajectory)
@@ -150,7 +154,6 @@ def recieve_transition(agent: GaussianMOMPOHumanoid, replay_buffer_q):
         while not replay_buffer_q.empty():
             transitions = replay_buffer_q.get()
             agent._replay_buffer.push(transitions)
-
 
 
 def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k):
@@ -181,10 +184,6 @@ def Learner(agent: GaussianMOMPOHumanoid, ps, actor_q, replay_buffer_q, args, k)
             if p.is_alive():
                 all_ps_finish = False
                 break
-        if t % 100 == 0:
-            avg_reward = test(agent, args, k)
-            for j in range(avg_reward.shape[0]):
-                writer.add_scalar(f'test_reward_{j}', avg_reward[j], t)
         for _ in range(args.multiprocess):
             actor_q.put(agent._actor.state_dict())
 
@@ -230,7 +229,7 @@ def test(agent: GaussianMOMPOHumanoid, args, k):
 
 def main():
     args = parse_args()
-    args.logdir = os.path.join(args.logdir, args.env, args.epsilons)
+    args.logdir = os.path.join(args.logdir, args.env, f'{args.epsilons},{args.alpha_mean},{args.alpha_std}')
     os.makedirs(args.logdir, exist_ok=True)
 
     # set random seed
@@ -274,7 +273,9 @@ def main():
                                   adam_eps=args.adam_eps,
                                   epsilon=args.epsilons, 
                                   k=k,
-                                  device=args.device)
+                                  device=args.device,
+                                  alpha_mean=args.alpha_mean,
+                                  alpha_std=args.alpha_std)
     agent._actor.share_memory()
 
     if args.model != '':
@@ -288,7 +289,7 @@ def main():
         actor_q = mp.Queue()
         ps = []
         for i in range(args.multiprocess):
-            ps.append(mp.Process(target=MultiTrain, args=(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_q, actor_q)))
+            ps.append(mp.Process(target=MultiTrain, args=(args, k, state_dim, action_dim, policy_layer_size, replay_buffer_q, actor_q, i)))
         for p in ps:
             p.start()
         Learner(agent, ps, actor_q, replay_buffer_q, args, k)
