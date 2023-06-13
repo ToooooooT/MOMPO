@@ -1,4 +1,6 @@
 # Multi-Objective Maximum a posteriori Policy Optimization (MO-MPO)
+## Demo
+![dee-sea-treasure demo](static/Screencast%20from%202023-06-13%2014-29-41.gif)
 ## Introduction
 This repository implements **MO-MPO** algorithm, introduced in ([Abdolmaleki, Huang et al., 2020](https://arxiv.org/abs/2005.07513)), by using PyTorch.
 
