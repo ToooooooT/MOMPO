@@ -1,0 +1,2 @@
+from envs.deep_sea_treasure.deep_sea_treasure import DeepSeaTreasure
+from envs.deep_sea_treasure.deep_sea_treasure_v0 import DeepSeaTreasureVisualization

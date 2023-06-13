@@ -1,7 +1,7 @@
 import pygame
 import numpy as np
 from pygame.locals import *
-from envs.deep_sea_treasure.deep_sea_treasure import DeepSeaTreasure
+from envs.deep_sea_treasure import DeepSeaTreasure
 import torch
 
 # Constants for visualization
