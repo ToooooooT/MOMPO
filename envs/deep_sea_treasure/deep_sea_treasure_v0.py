@@ -87,14 +87,14 @@ class DeepSeaTreasureVisualization:
         running = True
         while running:
             for event in pygame.event.get():
-                if event.type == QUIT:
+                if event.type == pygame.QUIT:
                     running = False
 
             # select action
             if self.agent == None:
                 action = [np.random.randint(self.env.action_spec[2][0], self.env.action_spec[2][1])]
             else:
-                action, _ = self.agent.select_action(torch.tensor(self.state, dtype=torch.float, device=self.device), 0)
+                action, _ = self.agent.select_action(torch.tensor(self.state, dtype=torch.float, device=self.device), 0, deterministic=True)
             self.state, _, done = self.env.step(action[0])
             self.update_display()
 

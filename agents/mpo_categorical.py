@@ -45,7 +45,7 @@ class BehaviorCategoricalMPO(MPO):
                                         device=device).to(device)
 
 
-    def select_action(self, state, epsilon):
+    def select_action(self, state, epsilon, deterministic=False):
         '''
         Args:
             state: expect shape (S,)
@@ -56,11 +56,16 @@ class BehaviorCategoricalMPO(MPO):
         '''
         with torch.no_grad():
             action_prob = self._actor(state)
-        m = Categorical(logits=action_prob)
-        if random.random() < epsilon:
-            action = torch.tensor(random.randint(0, self._action_dim - 1), device=self._device)
+            m = Categorical(logits=action_prob)
+
+        if deterministic:
+            action = torch.argmax(action_prob, dim=-1)
         else:
-            action = m.sample()
+            if random.random() < epsilon:
+                action = torch.tensor(random.randint(0, self._action_dim - 1), device=self._device)
+            else:
+                action = m.sample()
+        
         return action.unsqueeze(0).detach().cpu().numpy(), m.log_prob(action).unsqueeze(0).detach().cpu().numpy()
 
 
