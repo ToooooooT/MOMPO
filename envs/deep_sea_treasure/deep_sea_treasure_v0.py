@@ -66,9 +66,9 @@ class DeepSeaTreasureVisualization:
 
     def draw_agent(self): 
         row, col = self.state
+        print(f'Current state is [{row} {col}]')
         # centering
         agent_rect = pygame.Rect(col * CELL_SIZE[0], row * CELL_SIZE[1], CELL_SIZE[0], CELL_SIZE[1])
-        agent_rect.center = (col//2 + 0.5) * CELL_SIZE[0], (row//2 + 0.5) * CELL_SIZE[1]
         # display
         self.display_surface.blit(self.s_img, agent_rect)
 
@@ -80,6 +80,7 @@ class DeepSeaTreasureVisualization:
         pygame.time.wait(300) # pause for 0.3 second for each movement
         
     def play(self):
+        print('------------------------------- NEW GAME -------------------------------')
         self.state = self.env.reset()
         self.update_display()
 
@@ -93,15 +94,18 @@ class DeepSeaTreasureVisualization:
             if self.agent == None:
                 action = [np.random.randint(self.env.action_spec[2][0], self.env.action_spec[2][1])]
             else:
-                action = self.agent.select_action(torch.tensor(self.state, dtype=torch.float, device=self.device), 0)
+                action, _ = self.agent.select_action(torch.tensor(self.state, dtype=torch.float, device=self.device), 0)
             self.state, _, done = self.env.step(action[0])
             self.update_display()
 
             if done:
+                print(f'Done! Get Treasure {_[0]}')
+                print('------------------------------- END GAME -------------------------------')
                 pygame.time.wait(1000)  # pause for 1.0 second before resetting
+                print('------------------------------- NEW GAME -------------------------------')
                 self.state = self.env.reset()
                 self.update_display()
-            
+
             self.clock.tick(FPS)
 
         pygame.quit()
