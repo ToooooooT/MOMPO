@@ -1,7 +1,8 @@
 import pygame
 import numpy as np
 from pygame.locals import *
-from deep_sea_treasure import DeepSeaTreasure
+from envs.deep_sea_treasure.deep_sea_treasure import DeepSeaTreasure
+import torch
 
 # Constants for visualization
 CELL_SIZE = [1.2 * 50, 0.8 * 50]
@@ -14,15 +15,27 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 class DeepSeaTreasureVisualization:
-    def __init__(self, env):
+    def __init__(self, env, agent=None, device='cpu'):
         self.env = env
+        self.agent = agent
+        self.device = device
+        self.root = './envs/deep_sea_treasure'
         self.state = None
-        
+
         pygame.init()
         self.clock = pygame.time.Clock()
         self.display_surface = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         self.font = pygame.font.SysFont('Arial', 22)
         pygame.display.set_caption("Deep Sea Treasure")
+
+        # get treasure image
+        self.t_img = pygame.image.load(self.root + '/res/treasure.png')
+        self.t_img = pygame.transform.scale(self.t_img, (0.95*CELL_SIZE[0], 0.95*CELL_SIZE[1]))
+        self.t_img.convert()
+        # get submarine image
+        self.s_img = pygame.image.load(self.root + '/res/submarine.png')
+        self.s_img = pygame.transform.scale(self.s_img, (0.9 * CELL_SIZE[0], 0.9 * CELL_SIZE[1]))
+        self.s_img.convert()
 
     def draw_map(self):
         for row in range(self.env.sea_map.shape[0]):
@@ -35,10 +48,6 @@ class DeepSeaTreasureVisualization:
                 elif value == -10:
                     pygame.draw.rect(self.display_surface, BLACK, rect)
                 else:
-                    # get treasure image
-                    img = pygame.image.load('./res/treasure.png')
-                    img = pygame.transform.scale(img, (0.95*CELL_SIZE[0], 0.95*CELL_SIZE[1]))
-                    img.convert()
                     # centering
                     treasure_rect = pygame.Rect(col * CELL_SIZE[0], row * CELL_SIZE[1], CELL_SIZE[0], CELL_SIZE[1])
                     treasure_rect.center = (col + 0.5) * CELL_SIZE[0], (row + 0.5) * CELL_SIZE[1]
@@ -50,22 +59,18 @@ class DeepSeaTreasureVisualization:
                                                     0.5*CELL_SIZE[0], 0.5*CELL_SIZE[1])
                     value_rect.center = (col + 0.5) * CELL_SIZE[0], (row + 0.5) * CELL_SIZE[1]
                     # display
-                    self.display_surface.blit(img, treasure_rect)
+                    self.display_surface.blit(self.t_img, treasure_rect)
                     self.display_surface.blit(self.font.render(str(value), True, BLACK), value_rect)
 
                 pygame.draw.rect(self.display_surface, BLACK, rect, 1)
 
     def draw_agent(self): 
         row, col = self.state
-        # get submarine image
-        img = pygame.image.load('./res/submarine.png')
-        img = pygame.transform.scale(img, (0.9 * CELL_SIZE[0], 0.9 * CELL_SIZE[1]))
-        img.convert()
         # centering
         agent_rect = pygame.Rect(col * CELL_SIZE[0], row * CELL_SIZE[1], CELL_SIZE[0], CELL_SIZE[1])
         agent_rect.center = (col//2 + 0.5) * CELL_SIZE[0], (row//2 + 0.5) * CELL_SIZE[1]
         # display
-        self.display_surface.blit(img, agent_rect)
+        self.display_surface.blit(self.s_img, agent_rect)
 
     def update_display(self):
         self.display_surface.fill(WHITE)
@@ -85,12 +90,15 @@ class DeepSeaTreasureVisualization:
                     running = False
 
             # select action
-            action = np.random.randint(self.env.action_spec[2][0], self.env.action_spec[2][1])
-            self.state, _, done = self.env.step(action)
+            if self.agent == None:
+                action = [np.random.randint(self.env.action_spec[2][0], self.env.action_spec[2][1])]
+            else:
+                action = self.agent.select_action(torch.tensor(self.state, dtype=torch.float, device=self.device), 0)
+            self.state, _, done = self.env.step(action[0])
             self.update_display()
 
             if done:
-                pygame.time.wait(300)  # pause for 0.3 second before resetting
+                pygame.time.wait(1000)  # pause for 1.0 second before resetting
                 self.state = self.env.reset()
                 self.update_display()
             
